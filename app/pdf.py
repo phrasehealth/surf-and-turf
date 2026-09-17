@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import html
+import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import markdown
 
@@ -44,7 +47,26 @@ def markdown_to_html(title: str, body_md: str, author: str | None = None) -> str
     )
 
 
+def _ensure_native_libs() -> None:
+    """Let WeasyPrint find Homebrew's pango/glib on macOS.
+
+    WeasyPrint dlopen()s libgobject/libpango by bare name; on macOS those live
+    under the Homebrew prefix, which is not on the default search path, so the
+    import fails with "cannot load library 'libgobject-2.0-0'".  Linux and the
+    container image install them system-wide, so this is a no-op there.
+    """
+    if sys.platform != "darwin":
+        return
+    var = "DYLD_FALLBACK_LIBRARY_PATH"
+    current = os.environ.get(var, "")
+    for prefix in ("/opt/homebrew/lib", "/usr/local/lib"):  # arm64, then intel
+        if Path(prefix, "libgobject-2.0.dylib").exists() and prefix not in current.split(":"):
+            os.environ[var] = f"{current}:{prefix}".lstrip(":")
+            current = os.environ[var]
+
+
 def html_to_pdf(html_doc: str) -> bytes:
+    _ensure_native_libs()
     from weasyprint import HTML  # heavy import, keep it lazy
 
     return HTML(string=html_doc).write_pdf()

@@ -9,7 +9,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent.parent
+
+# `.env` is read here rather than only by docker compose's `env_file`, so that a
+# bare `uvicorn app.main:app` picks up the same settings.  Real environment
+# variables win, which keeps `AGENT_MODE=mock uvicorn ...` working.
+load_dotenv(ROOT / ".env", override=False)
 
 
 def _bool(name: str, default: bool = False) -> bool:

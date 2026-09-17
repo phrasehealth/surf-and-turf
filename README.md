@@ -44,7 +44,7 @@ tests/                  SQL guard, PDF render, and an end-to-end WebSocket round
 python3 -m venv .venv && . .venv/bin/activate
 pip3 install -r requirements.txt -r requirements-dev.txt
 pytest -q
-uvicorn app.main:app --reload --port 8080      # AGENT_MODE=mock by default
+uvicorn app.main:app --reload --port 8080      # AGENT_MODE=mock unless .env says otherwise
 ```
 
 Open http://localhost:8080, type "generate the report", and a real PDF is produced
@@ -56,11 +56,13 @@ except the model.
 ```bash
 cp .env.example .env            # fill in Snowflake + model; keep REPORT_STORAGE=local for now
 export AWS_PROFILE=your-profile # any credential chain works: profile, SSO, env vars, or AWS_BEARER_TOKEN_BEDROCK
-set -a; . ./.env; set +a
-AGENT_MODE=sdk uvicorn app.main:app --port 8080
+uvicorn app.main:app --port 8080  # `.env` is loaded by app/config.py; real env vars still win
 ```
 
 or `docker compose up --build` (mounts `~/.aws` read-only into the container).
+
+On macOS, PDF rendering needs WeasyPrint's native libraries: `brew install pango`
+(`app/pdf.py` adds the Homebrew prefix to the dynamic-loader path for you).
 
 Verify both dependencies before starting the app:
 `python scripts/check_snowflake.py` and `python scripts/check_bedrock.py`.
