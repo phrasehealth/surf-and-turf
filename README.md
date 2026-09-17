@@ -83,6 +83,8 @@ this app does not enable it.
    `SNOWFLAKE_ROLE` only `SELECT` grants; the guard is belt, the role is braces.
    If you want the agent to reuse logic from your script (connection quirks, helper views),
    port it into `SnowflakeBackend`.
+   For key-pair auth, drop the private key in `secrets/` (git-ignored; see `secrets/README.md`)
+   and verify the whole chain with `python scripts/check_snowflake.py` before starting the app.
 
 ## How a turn flows
 

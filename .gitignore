@@ -5,3 +5,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 run/
+# Credential material: the secrets/ dir has its own .gitignore too.
+secrets/*
+!secrets/.gitignore
+!secrets/README.md
+*.p8
+*.pem
+*.key

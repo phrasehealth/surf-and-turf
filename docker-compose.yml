@@ -7,8 +7,11 @@ services:
       # Local dev against Bedrock using your own AWS profile/SSO credentials.
       AWS_PROFILE: ${AWS_PROFILE:-default}
       PUBLIC_BASE_URL: http://localhost:8080
+      # The .env value is a host path; inside the container it is the mount below.
+      SNOWFLAKE_PRIVATE_KEY_PATH: /run/secrets/snowflake_key.p8
     volumes:
       - ~/.aws:/home/agent/.aws:ro
       - ./data/reports:/srv/report-agent/data/reports
+      - ./secrets/snowflake_key_2.p8:/run/secrets/snowflake_key.p8:ro
       # Uncomment to iterate on prompts without rebuilding:
       # - ./workspace:/srv/report-agent/workspace:ro

@@ -16,6 +16,19 @@ def _bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _path(name: str) -> str:
+    """A file path setting, expanded and resolved against the repo root.
+
+    Lets `.env` say `secrets/snowflake_key.p8` without depending on the
+    working directory; absolute values (the container mount) pass through.
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    return str(path if path.is_absolute() else ROOT / path)
+
+
 @dataclass(frozen=True)
 class Settings:
     # --- agent -------------------------------------------------------------
@@ -38,7 +51,7 @@ class Settings:
     snowflake_account: str = os.getenv("SNOWFLAKE_ACCOUNT", "")
     snowflake_user: str = os.getenv("SNOWFLAKE_USER", "")
     snowflake_password: str = os.getenv("SNOWFLAKE_PASSWORD", "")
-    snowflake_private_key_path: str = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH", "")
+    snowflake_private_key_path: str = _path("SNOWFLAKE_PRIVATE_KEY_PATH")
     snowflake_role: str = os.getenv("SNOWFLAKE_ROLE", "REPORT_READER")
     snowflake_warehouse: str = os.getenv("SNOWFLAKE_WAREHOUSE", "")
     snowflake_database: str = os.getenv("SNOWFLAKE_DATABASE", "")
