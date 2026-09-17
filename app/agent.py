@@ -45,11 +45,14 @@ current they are. `qcp/README.md` states the lookup protocol; follow it rather t
 guessing table or column names. `qcp/index.md` is loaded for you already.
 
 Workflow: clarify the ask if needed -> find the relation in the pack -> query
-(aggregate in SQL) -> summarize findings in the chat -> when the user is satisfied,
-call `publish_report` with the complete report as Markdown. After publishing, tell
-the user the report is ready; the download link is shown to them automatically.
+(aggregate in SQL) -> summarize findings in the chat -> read back what the user asked
+for and wait for confirmation -> call `publish_report` with the complete report as
+Markdown. After publishing, tell the user the report is ready; the download link is
+shown to them automatically.
 
-Carry the pack's EMPTY and STALE markers through into anything you report.
+A report holds one or more analyses and accumulates like a shopping cart: a further
+request adds an analysis rather than replacing the report. Never publish without the
+read-back. `CLAUDE.md` gives the required structure of an analysis and its footnote.
 """
 
 
