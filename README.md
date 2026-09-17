@@ -4,8 +4,9 @@ A self-hosted web app where a user chats with a Claude agent that queries Snowfl
 drafts an analytical report, and publishes it as a PDF with a download link, all in
 one container. It is the local VS Code + Claude Code reporting setup, packaged as a
 service: same engine (the Claude Agent SDK runs the Claude Code binary in-process),
-same `CLAUDE.md` instructions, same transforms repository for schema context, with
-Amazon Bedrock as the model provider.
+same `CLAUDE.md` instructions, with Amazon Bedrock as the model provider. Schema
+context comes from a generated **Query Context Pack** rather than the raw transforms
+repo — see `docs/catalog-design.md` for why.
 
 ```
 browser ──ws──> FastAPI ──> ClaudeSDKClient (one per conversation)
@@ -31,10 +32,18 @@ app/
   tools/publish_report.py publish_report tool (renders, stores, notifies the UI)
 static/index.html       Single-file chat UI (streaming text, tool activity, download cards)
 workspace/              What the agent sees as its project
-  CLAUDE.md             ← put your AGENTS.md content here (or make it `@AGENTS.md`)
-  README.md             ← your data notes
-  transforms/           ← git submodule of your transforms repo
-infra/                  ECS Fargate task definition + IAM task-role policy
+  CLAUDE.md             Agent instructions; @-imports the pack's README and index
+  README.md             Hand-written data notes the pack cannot supply
+  qcp/                  Generated Query Context Pack — gitignored, build it (below)
+scripts/
+  check_snowflake.py      Connectivity check for the SNOWFLAKE_* settings
+  check_bedrock.py        Connectivity check for Bedrock model access
+  query_context_pack_extractors/
+    phrase_data_model/    Builds the pack from Snowflake + the snowflake-etl dbt manifest
+docs/
+  query-context-pack-spec.md  The pack format, database-agnostic
+  catalog-design.md           Why the pack exists and what is in each tier
+infra/                  ECS task definition + IAM task-role policy (reference only)
 tests/                  SQL guard, PDF render, and an end-to-end WebSocket round-trip (mock mode)
 ```
 
@@ -51,37 +60,107 @@ Open http://localhost:8080, type "generate the report", and a real PDF is produc
 from mock data through the real `publish_report` tool. This exercises everything
 except the model.
 
-## Run against Bedrock
+## Run locally with credentials
+
+Three things to set up, in this order: the model, the database, and the Query Context
+Pack the agent uses to find tables. Each has a check you can run before moving on.
+
+### 1. Credentials
 
 ```bash
-cp .env.example .env            # fill in Snowflake + model; keep REPORT_STORAGE=local for now
-export AWS_PROFILE=your-profile # any credential chain works: profile, SSO, env vars, or AWS_BEARER_TOKEN_BEDROCK
-uvicorn app.main:app --port 8080  # `.env` is loaded by app/config.py; real env vars still win
+cp .env.example .env
 ```
 
-or `docker compose up --build` (mounts `~/.aws` read-only into the container).
+Fill in three groups:
+
+| group | what it needs |
+|---|---|
+| **Bedrock** | `AGENT_MODE=sdk`, `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL` (a cross-region inference profile id, `us.anthropic.claude-…`). Credentials come from any AWS chain: `AWS_PROFILE`, SSO, env vars, or `AWS_BEARER_TOKEN_BEDROCK`. |
+| **Snowflake** | `SNOWFLAKE_MODE=real`, plus `ACCOUNT`, `USER`, `ROLE`, `WAREHOUSE`, `DATABASE`. For key-pair auth put the key in `secrets/` (git-ignored) and set `SNOWFLAKE_PRIVATE_KEY_PATH`. Give the role `SELECT` only. |
+| **Pack build** | `SNOWFLAKE_ETL_DIR` — your `snowflake-etl` checkout, read for dbt manifests. |
+
+`.env` is loaded by `app/config.py`, so a bare `uvicorn` picks it up; real environment
+variables still win, which keeps `AGENT_MODE=mock uvicorn ...` working.
+
+Bedrock prerequisites: model access enabled in the account, and the caller allowed
+`bedrock:InvokeModel*` plus `bedrock:ListInferenceProfiles`/`GetInferenceProfile`
+(see `infra/iam-task-role-policy.json`). WebSearch is not available via Bedrock; this
+app does not enable it.
+
+### 2. Verify both connections
+
+```bash
+python scripts/check_snowflake.py     # auth, grants, and a real SELECT
+python scripts/check_bedrock.py       # boto3 Converse, then the Agent SDK path
+```
+
+Both print which stage failed and why. Do not skip these — a bad inference-profile id
+and an ungranted role fail at the same place in the UI but need different fixes.
+
+### 3. Build the minimum Query Context Pack
+
+The agent finds tables through `workspace/qcp/`. It is generated and git-ignored, so a
+fresh clone has none and `workspace/CLAUDE.md` will import files that do not exist.
+
+**The minimum is conformance level L0** — every relation, column and type, from
+`INFORMATION_SCHEMA` alone. No dbt manifest, no table scans, a few seconds:
+
+```bash
+python scripts/query_context_pack_extractors/phrase_data_model/build.py \
+    --stage introspect --stage render --stage validate
+```
+
+That is enough for the app to run and for the agent to stop guessing column names. Add
+the rest as it becomes worth it:
+
+| level | command adds | gives the agent | cost |
+|---|---|---|---|
+| **L0** | *(the minimum above)* | what exists, columns, types | metadata only |
+| **L2** | `--stage transforms` | descriptions, grain, lineage, the Clarity crosswalk | reads the dbt manifest |
+| **L3** | `--freshness` | row counts and latest business date; `EMPTY` / `STALE` markers | one scan per relation |
+| **L4** | `--joins --profiles` | verified join paths, value distributions | expensive; read the extractor README first |
+
+L2 needs a parsed manifest in your `snowflake-etl` checkout:
+
+```bash
+cd $SNOWFLAKE_ETL_DIR/epic/transforms && make parse
+```
+
+`build.py` with no flags runs introspect + transforms + render + validate — L2, and the
+sensible default. `--stage render` alone re-renders from cached facts without querying
+anything. See `scripts/query_context_pack_extractors/phrase_data_model/README.md`.
+
+### 4. Run
+
+```bash
+uvicorn app.main:app --port 8080
+```
+
+or `docker compose up --build`, which mounts `~/.aws` read-only into the container. The
+image ships `workspace/` including the pack, so **build the pack before `docker build`** —
+the build fails with a clear message if you do not.
 
 On macOS, PDF rendering needs WeasyPrint's native libraries: `brew install pango`
 (`app/pdf.py` adds the Homebrew prefix to the dynamic-loader path for you).
 
-Verify both dependencies before starting the app:
-`python scripts/check_snowflake.py` and `python scripts/check_bedrock.py`.
+### Keeping the pack current
 
-Bedrock prerequisites: model access enabled in the account, and the caller allowed
-`bedrock:InvokeModel*` plus `bedrock:ListInferenceProfiles`/`GetInferenceProfile`
-(see `infra/iam-task-role-policy.json`). Use a cross-region inference profile ID
-(`us.anthropic.claude-…`) in `ANTHROPIC_MODEL`. WebSearch is not available via Bedrock;
-this app does not enable it.
+The pack is a build artifact, not source. It goes stale when the warehouse changes, and
+`MANIFEST.md` records `built_at` and a `coverage` block so you can see how thin it is.
+Rebuilding L0–L2 is cheap and safe to run often; `--freshness` costs scans, so it suits a
+scheduled job rather than every start.
 
 ## Bring your local setup over
 
-1. **Instructions.** Copy your `AGENTS.md` into `workspace/CLAUDE.md`. Claude Code reads
-   `CLAUDE.md`; if you prefer to keep the file name, make `CLAUDE.md` a single line: `@AGENTS.md`.
-   The system prompt appended in `app/agent.py` (`SYSTEM_APPEND`) describes the tools; keep
-   report-content guidance in `CLAUDE.md`.
+1. **Instructions.** `workspace/CLAUDE.md` already wires up the pack — keep its
+   `@qcp/README.md` and `@qcp/index.md` imports and add your own report-content guidance
+   around them. The system prompt appended in `app/agent.py` (`SYSTEM_APPEND`) describes
+   the tools.
 2. **Data notes.** Copy your `README.md` into `workspace/README.md`.
-3. **Transforms.** `git submodule add <url> workspace/transforms`. The agent explores it with
-   Glob/Grep/Read exactly as it does locally.
+3. **Schema context.** Nothing to copy — build the Query Context Pack (above). It replaces
+   the transforms repo: `workspace/qcp/sources/` holds the model definitions the agent may
+   need, and everything else it needs is indexed. Query strategy worth writing down goes in
+   `workspace/qcp/concepts/<slug>.md`, which survives pack rebuilds.
 4. **Snowflake.** Your local script is replaced by the `run_sql` tool (`app/tools/snowflake_sql.py`).
    It connects with `snowflake-connector-python` using password or key-pair auth, forces a
    `STATEMENT_TIMEOUT`, rejects anything but a single `SELECT`/`WITH`, and caps rows. Give the
@@ -106,32 +185,14 @@ this app does not enable it.
 5. The session stays alive for follow-ups ("break that down by facility") until idle for
    `SESSION_IDLE_TTL_S`.
 
-## Deploying on AWS (ECS Fargate)
-
-```bash
-git submodule update --init
-docker build -t report-agent .
-aws ecr get-login-password | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-docker tag report-agent ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/report-agent:latest && docker push ...
-aws ecs register-task-definition --cli-input-json file://infra/ecs-task-definition.json
-```
-
-Then a Fargate service behind an ALB. Put authentication on the ALB listener (Cognito or any
-OIDC IdP): the app reads the user's identity from `X-Forwarded-User` / `X-Auth-Request-Email`
-for attribution and does no auth of its own. Enable WebSocket support (ALB does by default;
-idle timeout ≥ 5 min recommended). Set `REPORT_STORAGE=s3` with a private bucket; download
-links are presigned for `REPORT_URL_TTL_S`.
-
-**Scaling note.** Sessions are in-memory, so run one task or enable ALB sticky sessions.
-For horizontal scale, persist `session_id` from the `result` event and reconnect with
-`ClaudeAgentOptions(resume=...)`; the SDK also offers `SessionStore` for this.
-
 ## Security posture
 
 - Model has no Bash, Write, Edit, or network tools. It can only read `workspace/` and call
   the four custom tools.
 - SQL is validated read-only and row-capped in code; the Snowflake role must also be read-only.
-- Container runs as a non-root user; secrets come from Secrets Manager, never the image.
+- Container runs as a non-root user; secrets never go in the image.
+- The pack ships in the image and contains schema metadata, not data — except
+  `qcp/profiles/`, which carries sample column values and is only built on request.
 - `AGENT_MAX_TURNS` and `AGENT_MAX_BUDGET_USD` bound each turn.
 - Reports are written to a private bucket; links expire.
 
