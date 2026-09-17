@@ -1,0 +1,51 @@
+{
+  "family": "report-agent",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/report-agent-execution",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/report-agent-task",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64" },
+  "containerDefinitions": [
+    {
+      "name": "report-agent",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/report-agent:latest",
+      "essential": true,
+      "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+      "readonlyRootFilesystem": false,
+      "user": "10001",
+      "environment": [
+        { "name": "AGENT_MODE", "value": "sdk" },
+        { "name": "CLAUDE_CODE_USE_BEDROCK", "value": "1" },
+        { "name": "AWS_REGION", "value": "us-east-1" },
+        { "name": "ANTHROPIC_MODEL", "value": "us.anthropic.claude-sonnet-4-5" },
+        { "name": "AGENT_MAX_BUDGET_USD", "value": "2.00" },
+        { "name": "SNOWFLAKE_MODE", "value": "real" },
+        { "name": "SNOWFLAKE_ACCOUNT", "value": "xy12345.us-east-1" },
+        { "name": "SNOWFLAKE_USER", "value": "REPORT_AGENT" },
+        { "name": "SNOWFLAKE_ROLE", "value": "REPORT_READER" },
+        { "name": "SNOWFLAKE_WAREHOUSE", "value": "REPORTING_WH" },
+        { "name": "SNOWFLAKE_DATABASE", "value": "ANALYTICS" },
+        { "name": "REPORT_STORAGE", "value": "s3" },
+        { "name": "REPORT_S3_BUCKET", "value": "phrase-report-agent-output" }
+      ],
+      "secrets": [
+        { "name": "SNOWFLAKE_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:report-agent/snowflake:password::" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')\""],
+        "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/report-agent",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "app"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+services:
+  report-agent:
+    build: .
+    ports: ["8080:8080"]
+    env_file: .env
+    environment:
+      # Local dev against Bedrock using your own AWS profile/SSO credentials.
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+      PUBLIC_BASE_URL: http://localhost:8080
+    volumes:
+      - ~/.aws:/home/agent/.aws:ro
+      - ./data/reports:/srv/report-agent/data/reports
+      # Uncomment to iterate on prompts without rebuilding:
+      # - ./workspace:/srv/report-agent/workspace:ro
