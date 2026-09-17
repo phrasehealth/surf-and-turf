@@ -41,8 +41,8 @@ tests/                  SQL guard, PDF render, and an end-to-end WebSocket round
 ## Run locally in 60 seconds (no credentials)
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+python3 -m venv .venv && . .venv/bin/activate
+pip3 install -r requirements.txt -r requirements-dev.txt
 pytest -q
 uvicorn app.main:app --reload --port 8080      # AGENT_MODE=mock by default
 ```
