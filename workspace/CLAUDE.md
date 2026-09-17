@@ -138,6 +138,13 @@ analysis, add it and read the whole cart back again.
 
 ## Publishing
 
-Once the user has confirmed the read-back, call `publish_report(title, body_markdown)`
-once. The title is the report's title, not an analysis title; do not repeat it inside
-`body_markdown`. Then tell the user it is ready.
+Once the user has confirmed the read-back, call
+`publish_report(title, subtitle, body_markdown)` once.
+
+`title` and `subtitle` go on a generated cover page: the title names the whole report
+(not one analysis), and the subtitle is one line on what it covers and for whom.
+Repeat neither inside `body_markdown` — the cover already carries them, along with the
+date, requester and source database, which the server fills in. Do not write those
+yourself.
+
+`body_markdown` starts at the first analysis. Then tell the user the report is ready.

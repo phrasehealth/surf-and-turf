@@ -1,7 +1,11 @@
-"""Markdown -> styled HTML -> PDF. Deterministic; the model never touches PDF bytes."""
+"""Markdown -> styled HTML -> PDF. Deterministic; the model never touches PDF bytes.
+
+The body typography here is expressed in the design-system tokens loaded by
+`report_shell`, so a brand change is one stylesheet, not an edit in this file.
+The page furniture — cover, running header, footer — lives in `report_shell`.
+"""
 from __future__ import annotations
 
-import html
 import os
 import sys
 from datetime import datetime
@@ -9,42 +13,49 @@ from pathlib import Path
 
 import markdown
 
-_CSS = """
-@page { size: Letter; margin: 0.9in 0.8in 0.9in 0.8in;
-        @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #777; } }
-body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10.5pt;
-       line-height: 1.45; color: #1b1f24; }
-h1 { font-size: 22pt; margin: 0 0 4pt 0; }
-h2 { font-size: 15pt; margin: 20pt 0 6pt; border-bottom: 1px solid #d9dde3; padding-bottom: 3pt; }
-h3 { font-size: 12pt; margin: 14pt 0 4pt; }
-.meta { color: #6b7280; font-size: 9.5pt; margin-bottom: 18pt; }
-table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt; font-size: 9.5pt;
-        page-break-inside: auto; }
+from .report_shell import DESIGN_SYSTEM, document_html
+
+# Body styling only. Every value is a design-system token; nothing here invents
+# a colour or a font.
+_BODY_CSS = """
+html { font-size: 9pt; }
+body {
+  color: var(--fg-default);
+  font-family: var(--font-sans);
+  font-size: 10pt;
+  line-height: var(--lh-normal);
+}
+h1 { font-family: var(--font-display); font-weight: var(--fw-bold);
+     font-size: 20pt; margin: 0 0 4pt 0; color: var(--primary-950); }
+h2 { font-family: var(--font-display); font-weight: var(--fw-bold);
+     font-size: 14pt; margin: 18pt 0 6pt; padding-bottom: 3pt;
+     border-bottom: 1px solid var(--primary-200); color: var(--primary-950);
+     break-after: avoid; }
+h3 { font-weight: var(--fw-medium); font-size: 11pt; margin: 14pt 0 4pt;
+     color: var(--primary-900, var(--primary-950)); break-after: avoid; }
+p { margin: 0 0 6pt; }
+.meta { color: var(--fg-muted); font-size: 9pt; margin-bottom: 14pt; }
+
+table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt;
+        font-size: 9pt; break-inside: auto; }
 thead { display: table-header-group; }
-th, td { border: 1px solid #d9dde3; padding: 4pt 6pt; text-align: left; vertical-align: top; }
-th { background: #f3f4f6; font-weight: 600; }
-tr { page-break-inside: avoid; }
-code, pre { font-family: Menlo, Consolas, monospace; font-size: 9pt; background: #f6f8fa; }
-pre { padding: 8pt; border-radius: 4pt; white-space: pre-wrap; }
-blockquote { border-left: 3px solid #d9dde3; margin: 8pt 0; padding: 2pt 10pt; color: #4b5563; }
-img { max-width: 100%; }
+th, td { border: 1px solid var(--primary-200); padding: 4pt 6pt;
+         text-align: left; vertical-align: top; }
+th { background: var(--primary-50, #f3f4f6); font-weight: var(--fw-medium);
+     color: var(--primary-950); }
+td.num, th.num { text-align: right; font-family: var(--font-mono); }
+tr { break-inside: avoid; }
+
+code, pre { font-family: var(--font-mono); font-size: 8.5pt; }
+pre { background: var(--primary-50, #f6f8fa); padding: 8pt; border-radius: 4pt;
+      white-space: pre-wrap; break-inside: avoid; }
+blockquote { border-left: 3px solid var(--primary-200); margin: 8pt 0;
+             padding: 2pt 10pt; color: var(--fg-muted); }
+ul, ol { margin: 0 0 6pt; padding-left: 16pt; }
+li { margin-bottom: 2pt; }
+img, svg { max-width: 100%; }
+hr { border: 0; border-top: 1px solid var(--primary-200); margin: 14pt 0; }
 """
-
-
-def markdown_to_html(title: str, body_md: str, author: str | None = None) -> str:
-    body = markdown.markdown(
-        body_md,
-        extensions=["tables", "fenced_code", "sane_lists", "toc", "attr_list"],
-        output_format="html5",
-    )
-    meta = datetime.now().strftime("%B %d, %Y")
-    if author:
-        meta += f" &middot; {html.escape(author)}"
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{html.escape(title)}</title><style>{_CSS}</style></head><body>"
-        f"<h1>{html.escape(title)}</h1><div class='meta'>{meta}</div>{body}</body></html>"
-    )
 
 
 def _ensure_native_libs() -> None:
@@ -65,12 +76,40 @@ def _ensure_native_libs() -> None:
             current = os.environ[var]
 
 
+def markdown_to_body(body_md: str) -> str:
+    """The report body only. Title and metadata are the cover's job."""
+    return markdown.markdown(
+        body_md,
+        extensions=["tables", "fenced_code", "sane_lists", "toc", "attr_list"],
+        output_format="html5",
+    )
+
+
 def html_to_pdf(html_doc: str) -> bytes:
     _ensure_native_libs()
     from weasyprint import HTML  # heavy import, keep it lazy
 
-    return HTML(string=html_doc).write_pdf()
+    # base_url resolves the stylesheet's relative font URLs. Nothing is fetched
+    # over the network: the fonts ship in the image beside the stylesheet.
+    return HTML(string=html_doc, base_url=str(DESIGN_SYSTEM) + "/").write_pdf()
 
 
-def render_report_pdf(title: str, body_md: str, author: str | None = None) -> bytes:
-    return html_to_pdf(markdown_to_html(title, body_md, author))
+def render_report_pdf(title: str, body_md: str, author: str | None = None,
+                      subtitle: str = "", meta: list[tuple[str, str]] | None = None) -> bytes:
+    if meta is None:
+        meta = [("Generated", datetime.now().strftime("%Y-%m-%d"))]
+        if author:
+            meta.append(("Prepared for", author))
+    return html_to_pdf(
+        document_html(title, subtitle, meta, markdown_to_body(body_md), _BODY_CSS)
+    )
+
+
+# Kept for callers that want the body HTML with a heading, e.g. a future preview.
+def markdown_to_html(title: str, body_md: str, author: str | None = None) -> str:
+    import html as _html
+    meta = datetime.now().strftime("%B %d, %Y")
+    if author:
+        meta += f" &middot; {_html.escape(author)}"
+    return (f"<h1>{_html.escape(title)}</h1><div class='meta'>{meta}</div>"
+            + markdown_to_body(body_md))

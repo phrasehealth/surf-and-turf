@@ -15,6 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+# Design system: tokens + the .woff2 files the report shell references.
+# Fonts are resolved from disk at render time; nothing is fetched.
+COPY assets ./assets
 # Includes workspace/qcp, the Query Context Pack the agent reads. Build it
 # before `docker build`:  python scripts/query_context_pack_extractors/\
 #   phrase_data_model/build.py

@@ -74,6 +74,11 @@ class Settings:
     presign_ttl_s: int = int(os.getenv("REPORT_URL_TTL_S", str(24 * 3600)))
     # Public base URL of this service (used to build local download links)
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    # Printed shell. The handling marking sits in @bottom-center on every page,
+    # cover included; these reports aggregate patient data, so it defaults on.
+    # Set REPORT_MARKING="" to drop it for an externally-shared document.
+    report_marking: str = os.getenv("REPORT_MARKING", "Internal use only")
+    report_page_size: str = os.getenv("REPORT_PAGE_SIZE", "Letter")
 
     # --- server ------------------------------------------------------------
     session_idle_ttl_s: int = int(os.getenv("SESSION_IDLE_TTL_S", "3600"))

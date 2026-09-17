@@ -8,12 +8,44 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from claude_agent_sdk import tool
 
+from ..config import settings
 from ..pdf import render_report_pdf
 from ..storage import StoredReport, storage
+
+
+def _cover_meta(author: str | None) -> list[tuple[str, str]]:
+    """The cover's metadata block, supplied by the server rather than the model.
+
+    Date, requester and source database are facts the process knows; letting the
+    model state them would make them assertable, and therefore omittable. The
+    pack's build date rides along as a data-currency stamp.
+    """
+    meta: list[tuple[str, str]] = [("Generated", datetime.now().strftime("%Y-%m-%d"))]
+    if author:
+        meta.append(("Prepared for", author))
+    if settings.snowflake_database:
+        meta.append(("Source", settings.snowflake_database.upper()))
+    built = _pack_built_at()
+    if built:
+        meta.append(("Schema as of", built))
+    return meta
+
+
+def _pack_built_at() -> str:
+    manifest = Path(settings.workspace_dir) / "qcp" / "MANIFEST.md"
+    try:
+        for line in manifest.read_text().splitlines():
+            if line.startswith("built_at:"):
+                return line.split(":", 1)[1].strip()[:10]
+    except OSError:
+        pass
+    return ""
 
 OnPublished = Callable[[StoredReport, str], Awaitable[None]]
 
@@ -22,19 +54,23 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
     @tool(
         "publish_report",
         "Render the finished report to PDF and return a download link. Call this once "
-        "the analysis is complete and the user has confirmed the content. `body_markdown` "
-        "is the full report in Markdown (headings, paragraphs, tables). Do not include "
-        "the title in the body; pass it separately.",
-        {"title": str, "body_markdown": str},
+        "the analysis is complete and the user has confirmed the read-back. `title` and "
+        "`subtitle` go on the generated cover page — do not repeat either in the body. "
+        "`body_markdown` is the report itself: one section per analysis, then the "
+        "appendix of queries. The cover's date, requester and source database are added "
+        "by the server; do not write them yourself.",
+        {"title": str, "body_markdown": str, "subtitle": str},
     )
     async def publish_report(args: dict[str, Any]) -> dict[str, Any]:
         title = (args.get("title") or "Report").strip()
+        subtitle = (args.get("subtitle") or "").strip()
         body = args.get("body_markdown") or ""
         if len(body.strip()) < 20:
             return {"content": [{"type": "text", "text": "Rejected: body_markdown is empty."}],
                     "is_error": True}
         try:
-            pdf = await asyncio.to_thread(render_report_pdf, title, body, author)
+            pdf = await asyncio.to_thread(
+                render_report_pdf, title, body, author, subtitle, _cover_meta(author))
             stored = await storage.save(title, pdf, conversation_id)
         except Exception as e:
             return {"content": [{"type": "text", "text": f"PDF render/upload failed: {e}"}],

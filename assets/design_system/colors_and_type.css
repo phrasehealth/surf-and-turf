@@ -1,0 +1,272 @@
+/* ==========================================================================
+   Phrase Health Design System — Colors & Type
+   Source of truth: phrase-components/tokens/colors.ts (mainapp-client)
+   + Figma "App UI Design" file
+   ========================================================================== */
+
+/* ---------- Fonts ---------- */
+@font-face {
+  font-family: 'DM Sans';
+  src: url('fonts/dm-sans-vf.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-optical-sizing: auto;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Sans';
+  src: url('fonts/dm-sans-italic-variable.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-optical-sizing: auto;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-light-italic.woff2') format('woff2');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-regular-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('fonts/dm-mono-medium-italic.woff2') format('woff2');
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+/* DM Mono ships no true bold (max = Medium 500); let browsers synthesize weight only. */
+.ph-mono, code, pre { font-synthesis: weight; }
+
+:root {
+  /* ===== Color tokens (mainapp-client → AppThemeColors) ===== */
+
+  /* Primary — deep purple. The brand color. */
+  --primary-50:  #f1ecff;
+  --primary-100: #e5dcff;
+  --primary-200: #d3c1ff;
+  --primary-300: #bc9bff;
+  --primary-400: #ac73ff;
+  --primary-500: #a753ff;
+  --primary-600: #a234f7;
+  --primary-700: #9027db;
+  --primary-800: #7223b0;
+  --primary-900: #5c248b;
+  --primary-950: #29103c;        /* DEFAULT — used for sidenav, headers, primary buttons */
+  --primary:     #29103c;
+
+  /* Secondary — lavender / soft purple. Surfaces & chips. */
+  --secondary-50:  #f7f6fc;
+  --secondary-100: #f1eef9;
+  --secondary-200: #e6e1f5;     /* DEFAULT */
+  --secondary-300: #d1c6ec;
+  --secondary-400: #b8a5e0;
+  --secondary-500: #9f81d1;
+  --secondary-600: #8e65c2;
+  --secondary-700: #7d52af;
+  --secondary-800: #694493;
+  --secondary-900: #573979;
+  --secondary-950: #372451;
+  --secondary:     #e6e1f5;
+
+  /* Accent — peach orange. Highlights and the brand-gradient warm side. */
+  --accent-50:  #fff3e8;        /* DEFAULT */
+  --accent-100: #ffead5;
+  --accent-200: #fed1aa;
+  --accent-300: #fdaf74;
+  --accent-400: #fb833c;
+  --accent-500: #f96116;
+  --accent-600: #ea470c;
+  --accent-700: #c2330c;
+  --accent-800: #9a2912;
+  --accent-900: #7c2512;
+  --accent-950: #430f07;
+  --accent:     #fff3e8;
+
+  /* Semantic */
+  --info-50:  #eff6ff;
+  --info-500: #3b82f6;
+  --info-600: #2563eb;          /* DEFAULT — links / informational */
+  --info-700: #1d4ed8;
+  --info:     #2563eb;
+
+  --success-50:  #f0fdf4;
+  --success-500: #22c55e;
+  --success-600: #16a34a;        /* DEFAULT */
+  --success-700: #15803d;
+  --success:     #16a34a;
+
+  --warning-50:  #fcf7ea;
+  --warning-300: #eab843;        /* DEFAULT */
+  --warning-500: #d58e1d;
+  --warning-700: #934d15;
+  --warning:     #eab843;
+
+  --danger-50:  #fdf3f3;
+  --danger-500: #df5454;
+  --danger-600: #cc3d3d;         /* DEFAULT */
+  --danger-700: #aa2b2b;
+  --danger:     #cc3d3d;
+
+  /* Neutrals — dark / light scales */
+  --dark-50:  #f6f6f6;
+  --dark-100: #e7e7e7;
+  --dark-200: #d1d1d1;
+  --dark-300: #b0b0b0;
+  --dark-400: #888888;
+  --dark-500: #6d6d6d;
+  --dark-600: #5d5d5d;
+  --dark-700: #4f4f4f;
+  --dark-800: #454545;
+  --dark-900: #333333;          /* DEFAULT body text */
+  --dark-950: #262626;
+  --dark:     #333333;
+
+  --light-50:  #f8f8f8;        /* DEFAULT */
+  --light-100: #efefef;
+  --light-200: #dcdcdc;
+  --light-300: #bdbdbd;
+  --light-400: #989898;
+  --light-500: #7c7c7c;
+  --light-600: #656565;
+  --light-700: #525252;
+  --light-800: #464646;
+  --light-900: #3d3d3d;
+  --light-950: #292929;
+  --light:     #f8f8f8;
+
+  /* Named brand neutrals (Figma) */
+  --alabaster: #f8f8f8;          /* near-white app surface */
+  --magnolia:  #f2eef9;          /* soft purple wash */
+  --snuff:     #e9defa;          /* lavender chip / gradient stop */
+
+  /* ===== Semantic aliases (use these in product code) ===== */
+  --bg-app:        #dfdbe2;     /* the app shell background (figma) */
+  --bg-surface:    #ffffff;     /* cards, content panels */
+  --bg-muted:      var(--alabaster); /* secondary cards, nested surfaces */
+  --bg-subtle:     var(--magnolia);
+  --bg-sidenav:    var(--primary-950);
+
+  --fg-default:    #1f2937;     /* text-gray-800 in tailwind, used for body */
+  --fg-muted:      #6b7280;     /* gray-500 */
+  --fg-subtle:     #808080;
+  --fg-on-primary: #ffffff;
+  --fg-link:       var(--info);
+  --fg-brand:      var(--primary);
+
+  --border-default: #e5e7eb;    /* gray-200, the standard hairline */
+  --border-strong:  #cccccc;
+  --border-soft:    #f1ecff;    /* primary-50 hairline on lavender areas */
+
+  /* Brand gradient — used as login / hero background */
+  --brand-gradient: linear-gradient(to bottom right, #E9DEFA 0%, #FFFFFF 55%, #FFF3E8 100%); /* @kind other */
+
+  /* Shadows — Figma values, two-step ambient + key */
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.10), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.10), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.10), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 8px 24px rgba(149, 157, 165, 0.20);
+
+  /* Radii */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;     /* card radius */
+  --radius-xl: 20px;     /* outer app shell + content panel */
+  --radius-pill: 9999px;
+
+  /* Spacing — Tailwind 4-multiple system */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;          /* default card padding */
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* ===== Typography ===== */
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'DM Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-display: 'DM Sans', sans-serif; /* same family, used at heavier weight */
+
+  /* Base size — app uses 15px html font-size (tailwind config) */
+  --fs-base:   15px;
+  --fs-xs:     12px;       /* meta, breadcrumb, table footer */
+  --fs-sm:     13px;       /* table body, tight UI */
+  --fs-md:     14px;       /* default UI label */
+  --fs-lg:     16px;       /* body copy, button text */
+  --fs-xl:     18px;       /* section title */
+  --fs-2xl:    20px;       /* card title */
+  --fs-3xl:    24px;       /* page title */
+  --fs-4xl:    30px;       /* dashboard hero numbers */
+  --fs-5xl:    34px;
+
+  --lh-tight:  100%;       /* dense headings (figma uses 100% lineheight a lot) */
+  --lh-snug:   1.25; /* @kind font */
+  --lh-normal: 1.5; /* @kind font */
+  --lh-relaxed:1.65; /* @kind font */
+
+  --fw-light:    300; /* @kind font */
+  --fw-regular:  400; /* @kind font */
+  --fw-medium:   500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold:     700; /* @kind font */
+}
+
+/* ===== Semantic typography classes ===== */
+.ph-h1 { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-3xl); line-height: 1.2; color: var(--fg-default); letter-spacing: -0.01em; }
+.ph-h2 { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-2xl); line-height: 1.25; color: var(--fg-default); }
+.ph-h3 { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); line-height: 1.3; color: var(--fg-default); }
+.ph-h4 { font-family: var(--font-display); font-weight: 500; font-size: var(--fs-lg); line-height: 1.4; color: var(--fg-default); }
+.ph-eyebrow { font-family: var(--font-sans); font-weight: 500; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); }
+.ph-body  { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-lg); line-height: 1.5; color: var(--fg-default); }
+.ph-body-sm { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-md); line-height: 1.5; color: var(--fg-default); }
+.ph-caption { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-xs); line-height: 1.4; color: var(--fg-muted); }
+.ph-mono  { font-family: var(--font-mono); font-weight: 400; font-size: var(--fs-md); }
+.ph-button-label { font-family: var(--font-sans); font-weight: 500; font-size: var(--fs-md); letter-spacing: 0.005em; }
+.ph-table-cell   { font-family: var(--font-sans); font-weight: 400; font-size: var(--fs-md); color: var(--fg-default); }
+.ph-table-header { font-family: var(--font-sans); font-weight: 500; font-size: var(--fs-md); color: var(--fg-muted); }
+
+/* Defaults so any direct tag use looks correct */
+html { font-size: 15px; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  color: var(--fg-default);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
