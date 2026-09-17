@@ -8,7 +8,8 @@ into an async stream of small JSON-able events the UI understands:
   tool_use          the agent called a tool (name + compact input summary)
   tool_result       a tool returned (ok / error + short preview)
   report            a PDF was published (title, url, filename)
-  result            turn finished (cost, duration, error flag)
+  result            turn finished (duration for the turn; cost is the SDK's
+                    running total for the conversation, not this turn)
   error             something broke
 
 `MockAgentSession` implements the same interface with scripted output so the

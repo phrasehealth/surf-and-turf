@@ -43,6 +43,15 @@
   .tool .name { font-weight: 600; color: var(--ink); }
   .tool .detail { font-family: Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
   @keyframes pulse { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
+  /* Shown from the moment a prompt is sent until the agent produces something,
+     and again between a tool returning and the next output — the two places the
+     UI would otherwise sit silent and look broken. */
+  .thinking .body { display: inline-flex; gap: 4px; align-items: center; padding: 14px 12px; }
+  .thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
+                animation: blink 1.4s infinite both; }
+  .thinking i:nth-child(2) { animation-delay: .2s }
+  .thinking i:nth-child(3) { animation-delay: .4s }
+  @keyframes blink { 0%,80%,100% { opacity: .25 } 40% { opacity: 1 } }
   .report { margin: 10px 0 10px 74px; display: flex; align-items: center; gap: 14px; background: var(--panel);
             border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; }
   .report .icon { width: 36px; height: 44px; border-radius: 4px; background: var(--accent);
@@ -60,7 +69,6 @@
   form button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
                 padding: 0 18px; height: 44px; font-weight: 600; cursor: pointer; }
   form button:disabled { opacity: .5; cursor: default; }
-  .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -75,7 +83,6 @@
     <textarea id="input" placeholder="Describe the report you need… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
     <button id="send" type="submit">Send</button>
   </div>
-  <div class="hint">Reports are rendered to PDF and appear here with a download link when ready.</div>
 </form>
 
 <script>
@@ -139,6 +146,16 @@
       <a href="${esc(ev.url)}" target="_blank" rel="noopener" download>Download</a>`;
     log.appendChild(el); scroll();
   }
+  let thinkingEl = null;
+  function showThinking() {
+    if (thinkingEl || current) return;
+    thinkingEl = document.createElement('div');
+    thinkingEl.className = 'msg agent thinking';
+    thinkingEl.innerHTML = '<div class="who">Agent</div><div class="body"><i></i><i></i><i></i></div>';
+    log.appendChild(thinkingEl); scroll();
+  }
+  function hideThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
+
   function note(cls, text) { const el = document.createElement('div'); el.className = cls; el.textContent = text; log.appendChild(el); scroll(); }
 
   function setBusy(b) { busy = b; sendBtn.disabled = b; status.innerHTML = b ? 'working…' : `<b>ready</b> · ${cid ? cid.slice(0, 8) : ''}`; }
@@ -148,24 +165,26 @@
       case 'hello': setBusy(false); (ev.reports || []).forEach(addReport);
         if (ev.agent_mode === 'mock') note('meta', 'Running in mock mode (AGENT_MODE=mock): scripted agent, sample data.'); break;
       case 'turn_start': current = null; break;
-      case 'text_delta':
+      case 'text_delta': hideThinking();
         if (!current) current = { el: addMsg('agent', ''), text: '' };
         current.text += ev.text; current.el.querySelector('.body').innerHTML = md(current.text); scroll(); break;
-      case 'assistant_text':
+      case 'assistant_text': hideThinking();
         if (!current) current = { el: addMsg('agent', ''), text: '' };
         current.text = ev.text; current.el.querySelector('.body').innerHTML = md(ev.text); current = null; scroll(); break;
-      case 'tool_use': current = null; addTool(ev); break;
+      case 'tool_use': hideThinking(); current = null; addTool(ev); break;
       case 'tool_result': { const el = tools.get(ev.tool_use_id); if (el) el.classList.add(ev.is_error ? 'error' : 'done');
-        if (ev.is_error) note('error', ev.preview || 'tool error'); break; }
-      case 'report': addReport(ev); break;
-      case 'result': if (ev.cost_usd != null && ev.cost_usd > 0) note('meta', `Turn finished · $${ev.cost_usd.toFixed(3)} · ${Math.round(ev.duration_ms / 1000)}s`); break;
-      case 'error': note('error', ev.message); break;
-      case 'turn_end': setBusy(false); current = null; break;
+        if (ev.is_error) note('error', ev.preview || 'tool error'); showThinking(); break; }
+      case 'report': hideThinking(); addReport(ev); break;
+      // cost_usd is the SDK's running total for the conversation, not this turn:
+      // ResultMessage carries session totals that only reset when the conversation does.
+      case 'result': if (ev.cost_usd != null && ev.cost_usd > 0) note('meta', `Turn finished in ${Math.round(ev.duration_ms / 1000)}s · conversation total $${ev.cost_usd.toFixed(3)}`); break;
+      case 'error': hideThinking(); note('error', ev.message); break;
+      case 'turn_end': hideThinking(); setBusy(false); current = null; break;
     }
   }
 
   async function start() {
-    log.innerHTML = ''; tools.clear(); current = null;
+    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
     if (ws) { ws.onclose = null; ws.close(); }
     status.textContent = 'connecting…';
     const r = await fetch('/conversations', { method: 'POST' }); cid = (await r.json()).conversation_id;
@@ -178,7 +197,7 @@
 
   document.getElementById('form').addEventListener('submit', e => {
     e.preventDefault(); const text = input.value.trim(); if (!text || busy || !ws || ws.readyState !== 1) return;
-    addMsg('user', text); ws.send(JSON.stringify({ prompt: text })); input.value = ''; input.style.height = ''; setBusy(true);
+    addMsg('user', text); ws.send(JSON.stringify({ prompt: text })); input.value = ''; input.style.height = ''; setBusy(true); showThinking();
   });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('form').requestSubmit(); } });
   input.addEventListener('input', () => { input.style.height = ''; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; });

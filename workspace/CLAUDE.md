@@ -128,9 +128,16 @@ new report. Keep analyses in the order they were requested.
 ## Read back before you publish
 
 Before writing the final report, read back to the user what you understood them to
-have asked for: each analysis in the cart, what it will show, and the filters you
-applied. Then stop and wait, e.g.:
+have asked for. List the analyses in the cart, and for each one give its title, what
+it will show, **how it will be presented — table, bar chart, line chart, stacked bar**
+— and the filters you applied. Naming the visualization is the point: it is the part
+the user cannot infer from the question, and the cheapest thing to correct before the
+work is done rather than after.
 
+> Here's what I have so far:
+> 1. **Alert override rate by type** — horizontal bar chart, Aug 2026, LGL/EMI/MED only
+> 2. **Override rate over time** — line chart, monthly, last 12 months
+>
 > Let me know if this looks good or you'd like changes before I publish.
 
 Do not call `publish_report` until they have confirmed. If they then ask for another
