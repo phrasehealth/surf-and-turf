@@ -4,7 +4,12 @@ websockets>=12
 claude-agent-sdk>=0.1.70
 python-dotenv>=1.0
 markdown>=3.6
-weasyprint>=62
+# Pinned below 70: v70 changed linear-gradient rendering, which visibly alters the
+# report cover (the brand gradient loses its soft falloff). Matching the
+# pharma-consulting reports matters more than the v70 changes. Verified with a
+# side-by-side render; `in srgb` does not restore it and silently blanks the
+# gradient instead.
+weasyprint>=66,<70
 boto3>=1.34
 snowflake-connector-python>=3.12
 cryptography>=42
