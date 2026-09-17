@@ -15,7 +15,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+# Includes workspace/qcp, the Query Context Pack the agent reads. Build it
+# before `docker build`:  python scripts/query_context_pack_extractors/\
+#   phrase_data_model/build.py
 COPY workspace ./workspace
+RUN test -f ./workspace/qcp/index.md \
+    || (echo 'ERROR: workspace/qcp is missing; build the Query Context Pack first' \
+        && exit 1)
 
 # Writable locations: report output (local mode) and Claude Code's config dir.
 RUN mkdir -p /srv/report-agent/data/reports /home/agent/.claude \

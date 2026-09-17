@@ -34,7 +34,13 @@ PROJECTS = {
 PROFILES_YML = "profiles.yml"  # relative to SNOWFLAKE_ETL_DIR
 
 # --- outputs --------------------------------------------------------------
-DEFAULT_OUT = REPO_ROOT / "data" / "qcp"
+# The pack lands inside the agent's workspace, so it is simply a subdirectory of
+# the project the agent already has open: relative paths in the pack's own
+# README resolve, and the Dockerfile's `COPY workspace` ships it. Build the pack
+# before building the image.
+DEFAULT_OUT = REPO_ROOT / "workspace" / "qcp"
+# Intermediate facts stay outside the workspace: they are build state, not
+# context, and the agent must never read them.
 DEFAULT_WORK = REPO_ROOT / "data" / "qcp-work"
 
 # --- introspection --------------------------------------------------------

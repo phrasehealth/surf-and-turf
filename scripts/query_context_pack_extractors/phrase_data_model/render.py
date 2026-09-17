@@ -33,11 +33,17 @@ def _freshness_label(rel, fresh: dict) -> str:
         return ""
     d = f["max"]
     try:
-        stale = datetime.strptime(d, "%Y-%m-%d").date() < date.today() - timedelta(
-            days=config.STALE_AFTER_DAYS)
+        when = datetime.strptime(d, "%Y-%m-%d").date()
     except ValueError:
-        stale = False
-    return f"STALE {d}" if stale else f"fresh {d}"
+        return f"fresh {d}"
+    # A max date in the future is not freshness -- the column holds scheduled or
+    # projected values, or bad data. Saying "fresh" there would be a lie that
+    # reads like a guarantee, so flag it and let the consumer decide.
+    if when > date.today():
+        return f"FUTURE-DATED {d}"
+    if when < date.today() - timedelta(days=config.STALE_AFTER_DAYS):
+        return f"STALE {d}"
+    return f"fresh {d}"
 
 
 def render(work: Path, out: Path) -> dict:
@@ -184,6 +190,9 @@ def render(work: Path, out: Path) -> dict:
                      f"(measured {rel.freshness_measured_on})")
         elif rel.row_count == 0:
             L.append("freshness: **EMPTY** — this relation has no rows")
+        if rel.freshness_date and rel.freshness_date > date.today().isoformat():
+            L.append(f"note: `{rel.freshness_column}` holds dates in the future — "
+                     f"scheduled/projected values or bad data, not a freshness signal")
         if rel.last_altered:
             L.append(f"last written: {rel.last_altered}")
         if rel.tags:
@@ -378,7 +387,7 @@ this pack and not in a live `DESCRIBE`, say so rather than guessing a plausible 
 ## Reporting obligation
 
 When your answer is a number someone will act on, name the relations you used and
-pass through any `EMPTY` or `STALE` marker on them. A freshness caveat this pack
+pass through any `EMPTY`, `STALE` or `FUTURE-DATED` marker on them. A freshness caveat this pack
 supplied and your answer dropped is the most damaging way this system fails: a
 confidently wrong number that nothing downstream catches.
 """)
