@@ -62,6 +62,9 @@ AGENT_MODE=sdk uvicorn app.main:app --port 8080
 
 or `docker compose up --build` (mounts `~/.aws` read-only into the container).
 
+Verify both dependencies before starting the app:
+`python scripts/check_snowflake.py` and `python scripts/check_bedrock.py`.
+
 Bedrock prerequisites: model access enabled in the account, and the caller allowed
 `bedrock:InvokeModel*` plus `bedrock:ListInferenceProfiles`/`GetInferenceProfile`
 (see `infra/iam-task-role-policy.json`). Use a cross-region inference profile ID
