@@ -12,13 +12,19 @@ do not guess table or column names, and do not go looking for dbt models.**
 
 @qcp/index.md
 
-`qcp/README.md` above holds the full lookup protocol. In short: `index.md` is the
-gold reporting surface; `Grep qcp/columns.tsv` for any column name; `Grep
-qcp/aliases.tsv` when a user speaks in Epic Clarity terms (`ORDER_PROC`);
-`Read qcp/relations/<schema>/<relation>.md` once you have chosen a table.
+**Finding the relation is only half of it. `index.md` carries no column names, so
+having found your table there you still cannot write a query.** Before you put a
+column name in SQL you must have read that exact name, for that exact relation, in
+one of: `qcp/relations/<schema>/<relation>.md`, `qcp/columns.tsv`, or a live
+`describe_table`. A name that merely looks right is a guess — `icd_diagnoses` has
+`dx_code`, not `code`. Guessing costs a failed query and a turn.
 
-If `qcp/` is missing or a relation is absent from it, fall back to `list_tables`
-and `describe_table` and say that you did.
+The rest of the protocol, from `qcp/README.md` above: `Grep qcp/columns.tsv` to find
+which relations hold a column; `Grep qcp/aliases.tsv` when a user speaks in Epic
+Clarity terms (`ORDER_PROC`).
+
+If `qcp/` is missing or a relation is absent from it, fall back to `list_tables` and
+`describe_table` and say that you did.
 
 ## Data access
 
@@ -28,8 +34,8 @@ and `describe_table` and say that you did.
   connection supplies the database — do not write it yourself.
 - Confirm columns with `describe_table` before a final query if anything looks
   stale. The pack states when it was built.
-- **Never invent a column.** If it is not in the pack and not in `describe_table`,
-  say so.
+- **Never invent a column** — see the gate above. If a column you need is in neither
+  the pack nor `describe_table`, say so rather than trying a likely spelling.
 
 ## Freshness is not optional
 

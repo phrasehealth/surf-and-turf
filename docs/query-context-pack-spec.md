@@ -537,8 +537,10 @@ Load `MANIFEST.md` and `index.md` only. Everything else is on demand. Never load
 2. **A term that does not appear there** → `Grep` `aliases.tsv`, then `columns.tsv`.
    Users name columns and source-system objects at least as often as they name
    warehouse tables.
-3. **A chosen relation** → `Read relations/<schema>/<relation>.md`. This is the
-   only file needed to write a single-table query.
+3. **A chosen relation** → `Read relations/<schema>/<relation>.md`. **Not optional.**
+   `index.md` deliberately carries no column names (§5.3), so it is a sufficient-feeling
+   stopping point that cannot support a query. The relation page is the only file needed
+   to write a single-relation query, and it must be read before one is written.
 4. **A second relation** → `Grep joins.tsv` for both addresses before writing any
    `JOIN`. If no row exists, the join is unverified — say so, and prefer a
    single-relation answer or ask.
@@ -558,8 +560,16 @@ Load `MANIFEST.md` and `index.md` only. Everything else is on demand. Never load
   them, and say in the answer that they were assumptions.
 - If `MANIFEST.built_at` is older than the consumer's staleness threshold, confirm
   relation and column existence against the live database before the final query.
-- **Never invent a column.** If a needed column is not in the pack and not in a live
-  `DESCRIBE`, say so rather than guessing a plausible name.
+- **Never invent a column.** Before writing a column name in a query, the consumer
+  must have read that exact name, for that exact relation, on the relation page, in
+  `columns.tsv`, or from a live `DESCRIBE`. Plausibility is not evidence — a relation
+  described as a "diagnosis reference" may name the column `dx_code` rather than
+  `code`. If a needed column is in none of those places, say so rather than trying a
+  likely spelling.
+
+  An extractor must render this rule into the pack's `README.md` (§5.1). It is the
+  rule consumers are most likely to skip, because finding the right relation feels
+  like having finished the lookup.
 
 ### 8.4 Reporting obligations
 
