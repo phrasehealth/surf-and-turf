@@ -19,6 +19,16 @@ browser ──ws──> FastAPI ──> ClaudeSDKClient (one per conversation)
                                                                                  (or local /reports/)
 ```
 
+## How this works under the hood
+The ClaudeSDKClient package can spawn Claude Code CLI processes which act as the orchestrator (the agent loop and deciding which tool to call next). That runs within a container, having access to certain set of tools and files.
+ 
+* Built in Tools: Read/Glob/Grep
+* Custom tools: run_sql, list_tables, describe_table, publish_report (in-process MCP server)
+* (Anything outside this list of tools is denied by default - i.e. no bash, no write, and no network)
+* Files Loaded every conversation - claude.md plus its two @ imports qcp/README.md and qcp/index.md
+* Files reachable on demand: Everything in /workspace is available to read/glob/grap, and nothing outside that folder.
+
+
 ## Layout
 
 ```
@@ -98,9 +108,7 @@ Both print which stage failed and why. Do not skip these — a bad inference-pro
 and an ungranted role fail at the same place in the UI but need different fixes.
 
 ### 3. Build the minimum Query Context Pack
-
-The agent finds tables through `workspace/qcp/`. It is generated and git-ignored, so a
-fresh clone has none and `workspace/CLAUDE.md` will import files that do not exist.
+The Query Context Pack is a digested set of data that helps the application navigate the databases of interest. The agent finds tables through `workspace/qcp/`. It is generated and git-ignored, so a fresh clone has none and `workspace/CLAUDE.md` will import files that do not exist.
 
 **The minimum is conformance level L0** — every relation, column and type, from
 `INFORMATION_SCHEMA` alone. No dbt manifest, no table scans, a few seconds:
