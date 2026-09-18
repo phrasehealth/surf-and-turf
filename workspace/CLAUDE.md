@@ -30,8 +30,11 @@ If `qcp/` is missing or a relation is absent from it, fall back to `list_tables`
 
 - Query Snowflake only through `run_sql`, `list_tables` and `describe_table`. They
   are read-only and cap results at a few hundred rows: aggregate in SQL.
-- Relations are written `{database}.<schema>.<relation>` in the pack. Your
-  connection supplies the database — do not write it yourself.
+- The pack writes relations as `{database}.<schema>.<relation>`. **`{database}` is a
+  placeholder, not a name.** In SQL, write `<schema>.<relation>` and let the
+  connection supply the database. In prose and footnotes, name the database in
+  plain words ("Source: penn, `gold.order_events`"). Never copy the literal
+  string `{database}` into a report — it means nothing to the reader.
 - Confirm columns with `describe_table` before a final query if anything looks
   stale. The pack states when it was built.
 - **Never invent a column** — see the gate above. If a column you need is in neither

@@ -7,7 +7,9 @@ The page furniture — cover, running header, footer — lives in `report_shell`
 from __future__ import annotations
 
 import os
+import re
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -76,13 +78,37 @@ def _ensure_native_libs() -> None:
             current = os.environ[var]
 
 
+_MD_EXTENSIONS = ["tables", "fenced_code", "sane_lists", "toc", "attr_list"]
+_SVG_BLOCK = re.compile(r"(?s)<svg\b.*?</svg>")
+
+
 def markdown_to_body(body_md: str) -> str:
-    """The report body only. Title and metadata are the cover's job."""
-    return markdown.markdown(
-        body_md,
-        extensions=["tables", "fenced_code", "sane_lists", "toc", "attr_list"],
+    """The report body only. Title and metadata are the cover's job.
+
+    SVG charts are lifted out before conversion and put back afterwards.
+    python-markdown does not treat `svg` as a block-level element, so it parses
+    one as inline HTML inside a paragraph -- and any blank line within the markup
+    splits it, orphaning `</svg>` and re-emitting the `<text>` children as body
+    paragraphs. The visible symptom is a chart-shaped blank space with its axis
+    labels loose underneath it. Round-tripping the markup untouched avoids that
+    and every other way the converter could edit it.
+    """
+    held: list[str] = []
+    token = f"svgblock{uuid.uuid4().hex}"
+
+    def stash(m: re.Match) -> str:
+        held.append(m.group(0))
+        return f"\n\n{token}{len(held) - 1}\n\n"
+
+    html = markdown.markdown(
+        _SVG_BLOCK.sub(stash, body_md),
+        extensions=_MD_EXTENSIONS,
         output_format="html5",
     )
+    for i, svg in enumerate(held):
+        # The placeholder sits alone, so markdown wraps it in its own paragraph.
+        html = re.sub(rf"<p>\s*{token}{i}\s*</p>|{token}{i}", lambda _m, v=svg: v, html)
+    return html
 
 
 def html_to_pdf(html_doc: str) -> bytes:

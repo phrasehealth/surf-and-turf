@@ -37,3 +37,41 @@ def test_printed_shell_has_cover_header_and_footer():
     assert "First analysis" in body
     assert "2 / 2" in body, "page counter missing from the footer"
     assert "Internal use only".upper() in body.upper()
+
+
+def test_svg_chart_survives_markdown_conversion():
+    """A chart written across several lines, with a blank line inside the markup.
+
+    python-markdown does not treat `svg` as block-level, so without the
+    extract/restore round-trip it parses the chart as inline HTML in a paragraph
+    and a blank line splits it — the graphics disappear and the <text> children
+    land in the body as loose paragraphs. Observed in a real report before the fix.
+    """
+    from app.pdf import markdown_to_body
+
+    md = (
+        "## Chart\n\n"
+        '<svg viewBox="0 0 200 80" width="200" height="80" '
+        'xmlns="http://www.w3.org/2000/svg">\n'
+        '  <polyline points="0,60 50,40 100,50" fill="none" stroke="#4269d0"/>\n'
+        "\n"                                     # the blank line that broke it
+        '  <text x="0" y="75" font-size="8">2023-09</text>\n'
+        "</svg>\n\n"
+        "Body text after the chart.\n"
+    )
+    html = markdown_to_body(md)
+    assert html.count("<svg") == 1 and html.count("</svg>") == 1, "svg was split"
+    head = html.split("</svg>")[0]
+    assert "<polyline" in head, "chart geometry was dropped"
+    assert "<text" in head, "labels escaped the svg and became body text"
+    assert "<p><svg" not in html, "svg wrapped in a paragraph"
+    assert "Body text after the chart." in html
+
+
+def test_two_charts_in_one_report_both_survive():
+    from app.pdf import markdown_to_body
+
+    one = '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'
+    two = '<svg viewBox="0 0 20 20"><circle r="5"/></svg>'
+    html = markdown_to_body(f"## A\n\n{one}\n\ntext\n\n## B\n\n{two}\n")
+    assert html.count("<svg") == 2 and "<rect" in html and "<circle" in html
