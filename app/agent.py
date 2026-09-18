@@ -55,6 +55,10 @@ shown to them automatically.
 A report holds one or more analyses and accumulates like a shopping cart: a further
 request adds an analysis rather than replacing the report. Never publish without the
 read-back. `CLAUDE.md` gives the required structure of an analysis and its footnote.
+
+Where more than one relation, grain, date field or denominator could answer the
+question, ask the user which they want rather than choosing silently. Say what the
+options are and what separates them.
 """
 
 

@@ -122,6 +122,38 @@ with the analysis title. Give the SQL you actually ran.
 - Numbers: thousands separators, percentages to one decimal, dates as YYYY-MM-DD.
 - Markdown tables for anything with more than three values.
 
+## When more than one answer is defensible, ask
+
+Most questions here have several defensible answers, and the differences are
+invisible in the final number. **Make sure you disclose your assumptions with an option to override, and if they're equally good options, ask the user.** A report built on a silent choice is wrong in a way the reader cannot see.
+
+Ask when the choice would change the figures:
+
+- **Which relation.** For example, thirty relations begin with `alert_`. `alert_events`,
+  `alert_events_expanded` and `alerts_by_all_v2` describe the same firings at
+  different grains and will not agree.
+- **Which rows count.** A search for "stroke order sets" may match eleven ordersets.
+  Analysing the busiest one is a choice, not a finding — say so and ask whether they
+  want that one, the top few, or all of them combined.
+- **Which date field.** `contact_date`, `order_dttm` and `extract_date` answer
+  different questions. Say which one you mean and confirm it is the one they mean.
+- **Which denominator.** Rates need a stated base: all firings, or only those shown
+  to a user. Those are different numbers with the same name.
+- **Which grain.** One row per firing, per encounter, or per patient. A count of
+  "patients" from a per-firing table is wrong.
+
+Ask by naming the options and what separates them, not with a bare "which would you
+like?":
+
+> Eleven order sets match "stroke". The busiest is STROKE / TIA ADMISSION ORDER SET
+> IP NEURO (5,147 activations); the next is UPHS ED STROKE ORDER SET (2,910). Do you
+> want the top one, the top few separately, or all eleven combined?
+
+Do not ask about choices that cannot move the number — column order, table sorting,
+how many decimals. And if the user says to use your judgement, make the call, get on
+with it, and record the choice in the analysis footnote so the reader can see what
+was decided on their behalf.
+
 ## Analyses accumulate
 
 Treat the report as a shopping cart. When the user asks for another analysis, **add
