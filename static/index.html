@@ -35,12 +35,13 @@
   .msg .body code { background: var(--tool); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   .msg .body pre { background: var(--tool); padding: 8px; border-radius: 6px; overflow: auto; }
   /* Agent steps are diagnostics, not conversation: hidden unless asked for.
-     A failed step is not routine, so .tool.error stays visible either way. */
-  body:not(.show-steps) .tool:not(.error) { display: none; }
+     Tool failures are part of that activity and hide with it — the agent usually
+     recovers on its own. Connection and agent errors are not steps and stay. */
+  body:not(.show-steps) .tool,
+  body:not(.show-steps) .error.step { display: none; }
   header .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
                    color: var(--muted); cursor: pointer; user-select: none; }
   header .toggle input { margin: 0; cursor: pointer; }
-  header .toggle .count { font-variant-numeric: tabular-nums; }
   .tool { margin: 6px 0 6px 74px; font-size: 12.5px; color: var(--muted); background: var(--tool);
           border: 1px dashed var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; }
   .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px;
@@ -53,7 +54,9 @@
   /* Shown from the moment a prompt is sent until the agent produces something,
      and again between a tool returning and the next output — the two places the
      UI would otherwise sit silent and look broken. */
-  .thinking .body { display: inline-flex; gap: 4px; align-items: center; padding: 14px 12px; }
+  /* Not a message, so not a message bubble: no panel fill, no border. */
+  .thinking .body { display: inline-flex; gap: 5px; align-items: center;
+                    background: none; border: none; padding: 12px 2px; }
   .thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
                 animation: blink 1.4s infinite both; }
   .thinking i:nth-child(2) { animation-delay: .2s }
@@ -83,7 +86,7 @@
   <h1>Report Agent</h1>
   <div class="status" id="status">connecting…</div>
   <label class="toggle" title="Show the agent's tool calls (run_sql, Read, Grep…)">
-    <input type="checkbox" id="stepsToggle"> Agent steps <span class="count" id="stepCount"></span>
+    <input type="checkbox" id="stepsToggle"> Agent steps
   </label>
   <button id="newBtn" title="Start a new conversation">New conversation</button>
 </header>
@@ -143,9 +146,6 @@
     log.appendChild(el); scroll(); return el;
   }
   const stepsToggle = document.getElementById('stepsToggle');
-  const stepCount = document.getElementById('stepCount');
-  let steps = 0;
-  function renderStepCount() { stepCount.textContent = steps ? `(${steps})` : ''; }
   // Off on a first visit; a deliberate choice is remembered after that.
   try { stepsToggle.checked = localStorage.getItem('showSteps') === '1'; } catch (e) {}
   document.body.classList.toggle('show-steps', stepsToggle.checked);
@@ -156,7 +156,6 @@
   });
 
   function addTool(ev) {
-    steps++; renderStepCount();
     const el = document.createElement('div'); el.className = 'tool'; el.dataset.id = ev.id;
     const name = ev.name.replace(/^mcp__[^_]+__/, '');
     el.innerHTML = `<div class="dot"></div><div><span class="name">${esc(name)}</span> <span class="detail">${esc(ev.summary || '')}</span></div>`;
@@ -197,7 +196,7 @@
         current.text = ev.text; current.el.querySelector('.body').innerHTML = md(ev.text); current = null; scroll(); break;
       case 'tool_use': hideThinking(); current = null; addTool(ev); break;
       case 'tool_result': { const el = tools.get(ev.tool_use_id); if (el) el.classList.add(ev.is_error ? 'error' : 'done');
-        if (ev.is_error) note('error', ev.preview || 'tool error'); showThinking(); break; }
+        if (ev.is_error) note('error step', ev.preview || 'tool error'); showThinking(); break; }
       case 'report': hideThinking(); addReport(ev); break;
       // cost_usd is the SDK's running total for the conversation, not this turn:
       // ResultMessage carries session totals that only reset when the conversation does.
@@ -208,7 +207,7 @@
   }
 
   async function start() {
-    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null; steps = 0; renderStepCount();
+    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
     if (ws) { ws.onclose = null; ws.close(); }
     status.textContent = 'connecting…';
     const r = await fetch('/conversations', { method: 'POST' }); cid = (await r.json()).conversation_id;
