@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from .config import settings
+from .db import session_store
 from .storage import StoredReport
 from .workspace_guard import build_hook
 from .tools import publish_report as publish_tool
@@ -87,9 +88,13 @@ def _preview(content: Any, limit: int = 240) -> str:
 
 
 class AgentSession:
-    def __init__(self, conversation_id: str, user_id: str | None = None):
+    def __init__(self, conversation_id: str, user_id: str | None = None,
+                 sdk_session_id: str | None = None):
         self.id = conversation_id
         self.user_id = user_id
+        # Set when reviving a conversation whose process is gone: the transcript is
+        # mirrored to Postgres, so `resume` can materialise it (docs §6).
+        self.sdk_session_id = sdk_session_id
         self.created_at = time.time()
         self.last_used = time.time()
         self.reports: list[dict[str, Any]] = []
@@ -124,6 +129,10 @@ class AgentSession:
 
         return ClaudeAgentOptions(
             cwd=str(settings.workspace_dir),
+            # Mirror transcripts to Postgres and resume from them. The local copy
+            # under CLAUDE_CONFIG_DIR is ephemeral; this is the durable one.
+            session_store=session_store,
+            resume=self.sdk_session_id,
             setting_sources=["project"],  # loads workspace/CLAUDE.md
             system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_APPEND},
             tools=builtin,
@@ -198,6 +207,8 @@ class AgentSession:
                             yield {"type": "tool_result", "tool_use_id": b.tool_use_id,
                                    "is_error": bool(b.is_error), "preview": _preview(b.content)}
                 elif isinstance(msg, ResultMessage):
+                    if msg.session_id:
+                        self.sdk_session_id = msg.session_id
                     while not self._pending_reports.empty():
                         yield self._pending_reports.get_nowait()
                     yield {"type": "result", "is_error": msg.is_error, "subtype": msg.subtype,
@@ -299,6 +310,28 @@ class SessionManager:
 
     def get(self, cid: str) -> AgentSession | None:
         return self.sessions.get(cid)
+
+    async def revive(self, cid: str) -> AgentSession | None:
+        """Re-open a conversation whose in-memory session is gone.
+
+        Survives a restart because the SDK transcript is mirrored to Postgres:
+        `resume` materialises it when the local file is absent (docs §6). Returns
+        None for a conversation the database does not know.
+        """
+        if cid in self.sessions:
+            return self.sessions[cid]
+        from .db import repository
+
+        row = await repository.get_conversation(cid)
+        if row is None:
+            return None
+        cls = AgentSession if settings.agent_mode == "sdk" else MockAgentSession
+        s = cls(cid, user_id=row.get("user_id"))
+        s.sdk_session_id = row.get("sdk_session_id")
+        self.sessions[cid] = s
+        log.info("revived conversation %s (sdk_session=%s)", cid[:8],
+                 (s.sdk_session_id or "none")[:8])
+        return s
 
     async def close(self, cid: str) -> None:
         s = self.sessions.pop(cid, None)

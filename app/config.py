@@ -80,6 +80,13 @@ class Settings:
     report_marking: str = os.getenv("REPORT_MARKING", "Internal use only")
     report_page_size: str = os.getenv("REPORT_PAGE_SIZE", "Letter")
 
+    # --- database ----------------------------------------------------------
+    # Required. An unset DATABASE_URL is a startup failure, not a silent fallback
+    # to in-memory state, which would look like it worked.
+    database_url: str = os.getenv("DATABASE_URL", "")
+    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
+    db_echo: bool = _bool("DB_ECHO", False)
+
     # --- server ------------------------------------------------------------
     session_idle_ttl_s: int = int(os.getenv("SESSION_IDLE_TTL_S", "3600"))
     cors_origins: list[str] = field(

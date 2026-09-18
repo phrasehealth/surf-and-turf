@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -15,6 +16,7 @@ from typing import Any, Awaitable, Callable
 from claude_agent_sdk import tool
 
 from ..config import settings
+from ..db import repository
 from ..pdf import render_report_pdf
 from ..storage import StoredReport, storage
 
@@ -33,19 +35,25 @@ def _cover_meta(author: str | None) -> list[tuple[str, str]]:
         meta.append(("Source", settings.snowflake_database.upper()))
     built = _pack_built_at()
     if built:
-        meta.append(("Schema as of", built))
+        meta.append(("Schema as of", built.date().isoformat()))
     return meta
 
 
-def _pack_built_at() -> str:
+def _pack_built_at() -> datetime | None:
+    """When the Query Context Pack behind these numbers was built.
+
+    Returned as a datetime, not a string: asyncpg binds by Python type and will
+    not coerce text into a timestamptz the way psycopg does.
+    """
     manifest = Path(settings.workspace_dir) / "qcp" / "MANIFEST.md"
     try:
         for line in manifest.read_text().splitlines():
             if line.startswith("built_at:"):
-                return line.split(":", 1)[1].strip()[:10]
-    except OSError:
+                raw = line.split(":", 1)[1].strip()
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (OSError, ValueError):
         pass
-    return ""
+    return None
 
 OnPublished = Callable[[StoredReport, str], Awaitable[None]]
 
@@ -75,6 +83,18 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
         except Exception as e:
             return {"content": [{"type": "text", "text": f"PDF render/upload failed: {e}"}],
                     "is_error": True}
+        try:
+            await repository.record_report(
+                conversation_id, title=title, subtitle=subtitle,
+                storage_backend=settings.report_storage, storage_key=stored.filename,
+                report_uid=stored.report_id, size_bytes=stored.size_bytes,
+                published_by=author, handling_marking=settings.report_marking or None,
+                qcp_built_at=_pack_built_at(), body_markdown=body)
+        except Exception:
+            # The PDF exists and the user should get it; a bookkeeping failure is
+            # logged, not raised back at the model as a publish failure.
+            logging.getLogger("report-agent.tools").exception(
+                "failed to record report %s", stored.report_id)
         if on_published:
             await on_published(stored, title)
         payload = {"status": "published", "title": title, "download_url": stored.url,

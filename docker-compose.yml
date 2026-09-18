@@ -1,6 +1,24 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: report_agent
+      POSTGRES_USER: report_agent
+      POSTGRES_PASSWORD: report_agent     # local only; a deployment reads a secret
+    # Overridable: a contributor with a local Postgres already on 5432 can set
+    # POSTGRES_PORT=5433 rather than stopping it.
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes: [report_agent_pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U report_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   report-agent:
     build: .
+    depends_on:
+      postgres: { condition: service_healthy }
     ports: ["8080:8080"]
     env_file: .env
     environment:
@@ -9,9 +27,13 @@ services:
       PUBLIC_BASE_URL: http://localhost:8080
       # The .env value is a host path; inside the container it is the mount below.
       SNOWFLAKE_PRIVATE_KEY_PATH: /run/secrets/snowflake_key.p8
+      DATABASE_URL: postgresql+asyncpg://report_agent:report_agent@postgres:5432/report_agent
     volumes:
       - ~/.aws:/home/agent/.aws:ro
       - ./data/reports:/srv/report-agent/data/reports
       - ./secrets/snowflake_key_2.p8:/run/secrets/snowflake_key.p8:ro
       # Uncomment to iterate on prompts without rebuilding:
       # - ./workspace:/srv/report-agent/workspace:ro
+
+volumes:
+  report_agent_pg:

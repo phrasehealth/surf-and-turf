@@ -1,5 +1,12 @@
-"""End-to-end through the FastAPI app with the mock agent and mock Snowflake."""
+"""End-to-end through the FastAPI app with the mock agent and mock Snowflake.
+
+These now need a database: persistence is required, so the app's lifespan refuses
+to start without one. `client` skips with the same message as the other database
+tests when nothing is listening.
+"""
 import os
+
+import pytest
 
 os.environ.setdefault("AGENT_MODE", "mock")
 os.environ.setdefault("SNOWFLAKE_MODE", "mock")
@@ -10,8 +17,19 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-def test_conversation_roundtrip_publishes_pdf(tmp_path):
+@pytest.fixture
+def client(migrated_database):
+    """TestClient with the app's lifespan running against the test database."""
+    import app.config as cfg
+
+    object.__setattr__(cfg.settings, "database_url", migrated_database)
     with TestClient(app) as c:
+        yield c
+
+
+def test_conversation_roundtrip_publishes_pdf(tmp_path, client):
+    if True:
+        c = client
         cid = c.post("/conversations").json()["conversation_id"]
         with c.websocket_connect(f"/ws/{cid}") as ws:
             assert ws.receive_json()["type"] == "hello"
@@ -33,7 +51,8 @@ def test_conversation_roundtrip_publishes_pdf(tmp_path):
         assert c.get(f"/conversations/{cid}").json()["reports"][0]["filename"] == report["filename"]
 
 
-def test_download_rejects_traversal():
-    with TestClient(app) as c:
+def test_download_rejects_traversal(client):
+    if True:
+        c = client
         assert c.get("/reports/..%2Fapp%2Fmain.py").status_code in (404, 422)
         assert c.get("/reports/nope.pdf").status_code == 404

@@ -27,12 +27,14 @@ RUN test -f ./workspace/qcp/index.md \
         && exit 1)
 
 # Writable locations: report output (local mode) and Claude Code's config dir.
-RUN mkdir -p /srv/report-agent/data/reports /home/agent/.claude \
-    && chown -R agent:agent /srv/report-agent /home/agent
+RUN mkdir -p /srv/report-agent/data/reports /tmp/claude \
+    && chown -R agent:agent /srv/report-agent /home/agent /tmp/claude
 USER agent
 
 ENV PYTHONUNBUFFERED=1 \
-    CLAUDE_CONFIG_DIR=/home/agent/.claude \
+    # Scratch only: transcripts are mirrored to Postgres by the SessionStore
+    # adapter, which is what lets `resume` survive a task replacement.
+    CLAUDE_CONFIG_DIR=/tmp/claude \
     WORKSPACE_DIR=/srv/report-agent/workspace \
     REPORT_DIR=/srv/report-agent/data/reports \
     AGENT_MODE=sdk \

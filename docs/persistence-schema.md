@@ -162,13 +162,21 @@ CREATE UNIQUE INDEX ON analysis_queries (analysis_id) WHERE is_primary;
 CREATE TABLE analysis_parameters (
     analysis_id  uuid NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
     name         text NOT NULL,                  -- ':date_from', ':dx_codes'
-    kind         text NOT NULL,                  -- 'date'|'date_range'|'code_list'|'scalar'|'identifier'
+    -- WHAT the values are. Drives the picker: a diagnosis chooser is not a date
+    -- chooser. Free text rather than an enum because the list will grow, and a
+    -- migration per new domain is friction for no safety.
+    kind         text NOT NULL,                  -- see §3.1
+    -- HOW it is compared. This is the rule for what counts as a parameter at all
+    -- (§3.1), so recording it makes that judgement auditable rather than implicit.
+    operator     text NOT NULL,                  -- 'in'|'between'|'gt'|'gte'|'lt'|'lte'|'eq'
     value        jsonb NOT NULL,                 -- the binding
     -- What the user asked for, in their words. Not used by refresh (see §4) — it is
     -- for showing a parameter in a picker and for making a clone's diff legible.
     expression   text,                           -- 'ICD-10 D66*', 'August 2026'
     label        text,                           -- what to call it in the UI: "Patient population"
-    PRIMARY KEY (analysis_id, name)
+    PRIMARY KEY (analysis_id, name),
+    CONSTRAINT analysis_parameters_operator_check
+        CHECK (operator IN ('in', 'between', 'gt', 'gte', 'lt', 'lte', 'eq'))
 );
 
 -- Relations the specification reads. Declared, so "which analyses touch this table"
@@ -290,6 +298,68 @@ CREATE TABLE figures (
 );
 ```
 
+### 3.1 What counts as a parameter
+
+The test is the **shape of the comparison**, not the column. A parameter is anything
+filtered by set membership or by range:
+
+| shape | parameter? | example |
+|---|---|---|
+| `x IN (…)` | yes | `dx_code IN ('D66', 'D66.0')` |
+| `x BETWEEN a AND b` | yes | `contact_date BETWEEN :from AND :to` |
+| `x > / >= / < / <= v` | yes | `activations >= :threshold` |
+| `x = v` | usually not | `is_active_yn = 'Y'` |
+
+An equality is *usually* structure — part of what the analysis means rather than a
+choice someone might change. Not always: `master_type = 'LGL'` is a cohort selector
+wearing an equals sign. So `eq` is permitted and is the one case that needs judgement;
+the other operators are parameters by construction.
+
+That rule is the useful one because the agent can apply it from the SQL it just wrote,
+with no taxonomy to consult. Set membership and ranges are exactly the filters someone
+later wants to swap; a scalar equality usually is not.
+
+**`kind` values**, which say what a picker should show:
+
+`date_range` · `diagnosis` · `medication` · `orderset` · `procedure` · `alert` ·
+`panel` · `flowsheet_row` · `other`
+
+Deliberately not a database enum: the list will grow with the warehouse, and a
+migration per new domain buys nothing. `operator` *is* constrained, because that set
+is SQL's and does not move.
+
+**Why both columns.** `kind` drives the interface, `operator` drives the binding — a
+`diagnosis` bound with `in` needs a multi-select and a list, the same `diagnosis`
+bound with `eq` needs one value. Storing only `kind` would leave the clone code
+guessing at arity.
+
+### 3.2 Figure naming
+
+A figure is captioned by **its position in the report it appears in** — `Figure 1`,
+`Figure 2`. Nothing else.
+
+The earlier `R-88-03` embedded the report serial, and that serial does not exist until
+publish. It forced the body to carry placeholders resolved at render, and asked the
+agent to cite an identifier it could not yet know. Removing the report serial removes
+that problem rather than solving it.
+
+Durable identity does not need to live in the caption, because it already exists
+elsewhere: a figure is the chart of an analysis, and the analysis has a serial
+(`A-1042.1`) that `record_analysis` already returns. So the caption is for the reader
+and the analysis label is for anyone who has to find the thing again — "Figure 2 in
+the Stroke Order Set report" for a person, `A-1042.1` for a query.
+
+Two consequences worth stating:
+
+**The agent never writes a figure number.** The server numbers figures when it
+renders, from the order of `analyses` passed to `publish_report`. An agent that wants
+to cross-reference writes the analysis label as a placeholder (`{{figure:A-1042.1}}`)
+and the renderer substitutes `Figure 2` — the same substitution the chart SVG needs,
+which is why it is worth building once rather than twice.
+
+**`figures.label` is not unique.** Every report has a `Figure 1`.
+`UNIQUE (report_id, serial)` is the constraint that actually has to hold.
+
 ### Serials and labels
 
 `conversations.serial`, `analyses.serial` and `reports.serial` are identity columns:
@@ -357,11 +427,21 @@ allows it: run each chosen analysis afresh, then publish with
 `origin_conversation_id` null.
 
 ```sql
--- what a user can pick from
-SELECT a.serial, a.title, a.created_by, max(ar.ran_at) AS last_run
+-- what a user can pick from. Most recorded analyses were never published, so the
+-- picker needs a relevance signal; whether one ever reached a report is a good one
+-- and costs no extra column.
+SELECT a.serial, a.version, a.title, a.created_by,
+       max(ar.ran_at) AS last_run,
+       EXISTS (SELECT 1 FROM report_contents rc
+                 JOIN analysis_runs r2 ON r2.id = rc.analysis_run_id
+                WHERE r2.analysis_id = a.id) AS was_published
   FROM analyses a LEFT JOIN analysis_runs ar ON ar.analysis_id = a.id
  WHERE a.archived_at IS NULL AND a.created_by = $1
- GROUP BY a.serial, a.title, a.created_by ORDER BY last_run DESC NULLS LAST;
+   -- only the current version of each lineage
+   AND NOT EXISTS (SELECT 1 FROM analyses newer
+                    WHERE newer.lineage_id = a.lineage_id AND newer.version > a.version)
+ GROUP BY a.id, a.serial, a.version, a.title, a.created_by
+ ORDER BY was_published DESC, last_run DESC NULLS LAST;
 ```
 
 **3 — Clone an analysis with different filters.** Copy the specification, rebind the
@@ -623,7 +703,7 @@ what fixes half these column types:
 record_analysis(
     title, subtitle, note_template,
     queries,          # [{tool_use_id, sql_template, purpose, primary: bool}] — in order
-    parameters,       # [{name, kind, value, expression, label}]
+    parameters,       # [{name, kind, operator, value, expression, label}] — §3.1
     relations,        # ["gold.order_events_expanded", …]
     joins,            # [{left, right, verified, match_pct}]
     chart_type=None, chart_spec=None,
@@ -655,10 +735,12 @@ figure/analysis linkage is established by the server rather than asserted by the
 model — the same principle as the download URL and the figure SVG.
 
 **Recording is independent of publishing.** Plenty of conversations end with the user
-having got what they needed and no PDF produced; those analyses are still worth
-keeping, and they are what feature 2 later picks from. So the cart is simply the set
-of recorded analyses on a conversation, and `publish_report` selects an ordered subset
-of it:
+having got what they needed and no PDF produced, and plenty of others record more than
+they publish — a cohort that turned out wrong, a figure the user did not want, a
+question answered on the way to a better one. Those analyses are still worth keeping:
+they are what feature 2 later picks from, and an abandoned attempt is often the thing
+someone wants to resume. So the cart is simply the set of recorded analyses on a
+conversation, and `publish_report` selects an ordered subset of it:
 
 ```python
 publish_report(title, subtitle, body_markdown,
@@ -802,13 +884,10 @@ of it is needed to build and prove the schema locally.
 ## 9. Still open
 
 The execution model, granularity, template fidelity, correction semantics, cart
-membership and the publish gate are all decided (§7). What remains:
-
-**What is a parameter, and what is structure.** A cohort filter clearly is. The
-grouping column, the date field, a `top N` cutoff — less clear, and if everything
-becomes a parameter the clone picker is unusable. The `kind` enum is where to draw
-the line, but the values are not chosen yet, and the agent needs a rule it can apply
-without asking every time.
+membership, the publish gate, what counts as a parameter (§3.1) and figure naming
+(§3.2) are all decided. `chart_spec` stays `jsonb` with no enforced schema — the
+agent supplies the column-to-channel mapping, and it can be tightened later if
+`charts.py` turns out to want a stricter contract. What remains:
 
 **Reading back from the cart — outlined, deliberately deferred.**
 
@@ -826,9 +905,13 @@ four small pieces:
 2. A `list_analyses()` tool returns this conversation's cart — label, title,
    visualization, bound parameters — so the agent reads from state rather than memory.
    (It is also what feature 2's picker needs, so it is not single-purpose.)
-3. The read-back becomes a rendering of that list. The requirement that every analysis
-   names its visualization stops being an instruction the agent might skip and becomes
-   a column that is either populated or not.
+3. The read-back becomes a rendering of the analyses **proposed for this report** —
+   not of the whole cart. Most conversations record more than they publish: dead ends,
+   a cohort that turned out wrong, a figure the user did not want. So the agent
+   selects from `list_analyses()` and reads back the selection, which is the same
+   ordered list it will later pass to `publish_report`. The requirement that every
+   analysis names its visualization stops being an instruction the agent might skip
+   and becomes a column that is either populated or not.
 4. `publish_report`'s gate tightens: the labels in `analyses` must be ones the agent
    read back, which closes the gap between what the user approved and what gets
    published.
@@ -839,16 +922,11 @@ now would describe a tool that does not exist, and the prose read-back works in 
 meantime. Revisit when step 3 lands — the cost is small at that point and the drift it
 removes is the kind a reader cannot see.
 
-**The shape of `chart_spec`.** It is `jsonb` with no schema. An `hbar` needs a label
-column and a value column; a line chart needs x, series and value. Either the agent
-maps result columns to channels, or the server infers from the primary query's result
-shape and column types. Inferring fails in a narrower way, but only if `charts.py`
-declares what each form requires.
-
-**How figure labels reach the report body.** `record_analysis` returns `A-1042.1`,
-but a figure is `R-88-03` and the report serial does not exist until publish. So the
-body carries placeholders resolved at render — the same substitution the chart SVG
-needs, and worth building once.
+**The adopted-result cache.** "Adopt" means binding to results `run_sql` already
+produced, and the server does not keep them: `run_sql` returns rows to the model and
+discards them. A per-conversation cache keyed by `tool_use_id` is a hard prerequisite
+— bounded naturally, since each result is capped at `SQL_ROW_LIMIT` rows, but it needs
+a TTL and an eviction rule. Nothing else in `record_analysis` can be built first.
 
 **Concurrency on refresh.** Re-running twenty analyses is twenty Snowflake queries
 with no user waiting. That wants a job queue, not a request handler, and nothing here

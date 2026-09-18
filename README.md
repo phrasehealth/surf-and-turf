@@ -41,6 +41,8 @@ app/
   tools/snowflake_sql.py  run_sql / list_tables / describe_table (read-only guard, row cap, timeout)
   tools/publish_report.py publish_report tool (renders, stores, notifies the UI)
 static/index.html       Single-file chat UI (streaming text, tool activity, download cards)
+app/db/                 Persistence: engine, repository, event writer, SDK session store
+alembic/                Migrations (`alembic upgrade head`)
 workspace/              What the agent sees as its project
   CLAUDE.md             Agent instructions; @-imports the pack's README and index
   README.md             Hand-written data notes the pack cannot supply
@@ -57,14 +59,26 @@ infra/                  ECS task definition + IAM task-role policy (reference on
 tests/                  SQL guard, PDF render, and an end-to-end WebSocket round-trip (mock mode)
 ```
 
-## Run locally in 60 seconds (no credentials)
+## Run locally in 5 minutes (no model or warehouse credentials)
+
+Persistence is required — the app records every conversation, turn and report — so
+this needs a Postgres, but nothing else.
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip3 install -r requirements.txt -r requirements-dev.txt
+
+docker compose up -d postgres                  # POSTGRES_PORT=5433 if 5432 is taken
+export DATABASE_URL=postgresql+asyncpg://report_agent:report_agent@localhost:5432/report_agent
+alembic upgrade head
+
 pytest -q
 uvicorn app.main:app --reload --port 8080      # AGENT_MODE=mock unless .env says otherwise
 ```
+
+Without `DATABASE_URL` the app refuses to start and tells you these commands, rather
+than falling back to memory and looking like it worked. The database tests skip with
+the same message when nothing is listening on 5432.
 
 Open http://localhost:8080, type "generate the report", and a real PDF is produced
 from mock data through the real `publish_report` tool. This exercises everything
@@ -88,6 +102,7 @@ Fill in three groups:
 | **Bedrock** | `AGENT_MODE=sdk`, `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL` (a cross-region inference profile id, `us.anthropic.claude-…`). Credentials come from any AWS chain: `AWS_PROFILE`, SSO, env vars, or `AWS_BEARER_TOKEN_BEDROCK`. |
 | **Snowflake** | `SNOWFLAKE_MODE=real`, plus `ACCOUNT`, `USER`, `ROLE`, `WAREHOUSE`, `DATABASE`. For key-pair auth put the key in `secrets/` (git-ignored) and set `SNOWFLAKE_PRIVATE_KEY_PATH`. Give the role `SELECT` only. |
 | **Pack build** | `SNOWFLAKE_ETL_DIR` — your `snowflake-etl` checkout, read for dbt manifests. |
+| **Database** | `DATABASE_URL`. Required. See above. |
 
 `.env` is loaded by `app/config.py`, so a bare `uvicorn` picks it up; real environment
 variables still win, which keeps `AGENT_MODE=mock uvicorn ...` working.
@@ -207,6 +222,9 @@ scheduled job rather than every start.
   `qcp/profiles/`, which carries sample column values and is only built on request.
 - `AGENT_MAX_TURNS` and `AGENT_MAX_BUDGET_USD` bound each turn.
 - Reports are written to a private bucket; links expire.
+- Conversations, turns, the event log and reports are persisted (see
+  `docs/persistence-schema.md`). The SDK transcript is mirrored to Postgres so a
+  conversation can be resumed after a restart; `CLAUDE_CONFIG_DIR` is scratch.
 
 ## Configuration
 
