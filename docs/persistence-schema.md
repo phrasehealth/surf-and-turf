@@ -4,7 +4,15 @@
 **Scope:** what the report agent stores in Postgres, and why
 **Prerequisite:** there is no database today. `SessionManager.sessions` is an
 in-memory dict, and the only durable artefacts are the PDFs in `data/reports/`
-(or S3). This introduces a new dependency.
+(or S3). This introduces a new, **required** dependency: the app does not start
+without it.
+
+**Standing assumption:** the system is being changed so that no PHI reaches it. This
+document is written for that world — transcripts are stored whole, result previews
+are kept, and there is no redaction layer. Until that change actually lands, a
+deployment holding real query output inherits the handling rules of the PDFs, and
+§7's note on write-time redaction is the interim measure. Local development against
+the current warehouse is the case to watch: `run_sql` previews carry real rows today.
 
 ---
 
@@ -109,23 +117,45 @@ CREATE TABLE analyses (
     -- Global and human-facing, so a user can cite one when assembling a report.
     serial              bigint NOT NULL GENERATED ALWAYS AS IDENTITY UNIQUE,
     origin_conversation_id uuid REFERENCES conversations(id) ON DELETE SET NULL,
-    -- Feature 3: a clone records what it was cloned from, so a family of cohort
-    -- variants stays legible instead of looking like unrelated analyses.
+    -- Correcting an analysis makes a new version rather than editing the old one:
+    -- a published report points at a run, and that run's specification must stay
+    -- exactly as it was. `lineage_id` is stable across versions, so `A-1042` names
+    -- the family and `A-1042.2` names one member.
+    lineage_id          uuid NOT NULL,
+    version             integer NOT NULL DEFAULT 1,
+    supersedes_id       uuid REFERENCES analyses(id) ON DELETE SET NULL,
+    -- Feature 3: a clone starts a NEW lineage and records where it came from.
+    -- Distinct from supersedes_id: a correction continues a lineage, a clone forks.
     derived_from_id     uuid REFERENCES analyses(id) ON DELETE SET NULL,
     title               text NOT NULL,
     subtitle            text,
     note_template       text,        -- footnote text; parameters interpolated at run time
-    -- The query as a template with :named parameters, never with literals baked in.
-    -- Swapping a cohort means rebinding a parameter, not rewriting SQL.
-    sql_template        text NOT NULL,
     chart_type          text,        -- 'hbar' | 'vbar' | 'stacked' | 'stat_tiles' | NULL for table-only
     chart_spec          jsonb,       -- which result columns map to which channel
     created_at          timestamptz NOT NULL DEFAULT now(),
     created_by          text,
-    archived_at         timestamptz  -- hidden from pickers; never deleted, runs reference it
+    archived_at         timestamptz, -- hidden from pickers; never deleted, runs reference it
+    UNIQUE (lineage_id, version)
 );
 CREATE INDEX ON analyses (created_by, created_at DESC);
 CREATE INDEX ON analyses (derived_from_id);
+CREATE INDEX ON analyses (lineage_id, version DESC);
+
+-- An analysis may need several queries -- "the top five departments", then monthly
+-- counts for those five -- under one title and one footnote. Exactly one is the
+-- primary: it is what the table shows and what the chart is drawn from.
+CREATE TABLE analysis_queries (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    analysis_id  uuid NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+    seq          integer NOT NULL,
+    purpose      text,                             -- 'cohort', 'ranking', 'series' …
+    is_primary   boolean NOT NULL DEFAULT false,
+    -- The reusable form, with :named parameters. It need not reproduce the executed
+    -- SQL byte for byte -- see `template_verified` on the run.
+    sql_template text NOT NULL,
+    UNIQUE (analysis_id, seq)
+);
+CREATE UNIQUE INDEX ON analysis_queries (analysis_id) WHERE is_primary;
 
 -- The swappable parts. `expression` is the intent, `value` the current binding:
 -- a refresh re-resolves "last 12 months", an absolute range is left alone.
@@ -133,8 +163,10 @@ CREATE TABLE analysis_parameters (
     analysis_id  uuid NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
     name         text NOT NULL,                  -- ':date_from', ':dx_codes'
     kind         text NOT NULL,                  -- 'date'|'date_range'|'code_list'|'scalar'|'identifier'
-    value        jsonb NOT NULL,                 -- the resolved binding
-    expression   text,                           -- 'last 12 months', 'ICD-10 D66*'
+    value        jsonb NOT NULL,                 -- the binding
+    -- What the user asked for, in their words. Not used by refresh (see §4) — it is
+    -- for showing a parameter in a picker and for making a clone's diff legible.
+    expression   text,                           -- 'ICD-10 D66*', 'August 2026'
     label        text,                           -- what to call it in the UI: "Patient population"
     PRIMARY KEY (analysis_id, name)
 );
@@ -164,24 +196,46 @@ CREATE TABLE analysis_runs (
     analysis_id    uuid NOT NULL REFERENCES analyses(id) ON DELETE RESTRICT,
     ran_at         timestamptz NOT NULL DEFAULT now(),
     ran_by         text,
-    -- The template with this run's bindings applied, as executed.
-    resolved_sql   text NOT NULL,
+    -- 'adopted'  : bound to results `run_sql` had already produced (the normal path)
+    -- 'executed' : the server ran the templates itself, e.g. a refresh
+    origin         text NOT NULL DEFAULT 'adopted',
     bound_params   jsonb NOT NULL,               -- snapshot: what the params were THIS time
     database_name  text NOT NULL,
     role_name      text,
-    duration_ms    integer,
-    row_count      integer,
-    error          text,
-    -- Provenance of the schema knowledge, and of the data's own currency.
+    error          text,                         -- set when a query in the run failed
+    -- Provenance of the schema knowledge behind the numbers.
     qcp_built_at   timestamptz,
     qcp_conformance text,
     freshness      jsonb,                        -- {'gold.alert_events': 'fresh 2026-09-15', …}
-    -- Lets a refresh answer "did anything actually change?" without keeping rows.
-    result_digest  text,
-    -- No result column: results are PHI. See §5.
     resolved_note  text                          -- the footnote as rendered for this run
 );
 CREATE INDEX ON analysis_runs (analysis_id, ran_at DESC);
+
+-- One row per query per run. The executed SQL lives here, not on the specification:
+-- an adopted run records what `run_sql` actually sent, which may differ slightly from
+-- the template the agent declared.
+CREATE TABLE analysis_run_queries (
+    run_id            uuid NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    analysis_query_id uuid NOT NULL REFERENCES analysis_queries(id) ON DELETE RESTRICT,
+    -- Links an adopted row back to the step in the transcript that produced it.
+    tool_use_id       text,
+    resolved_sql      text NOT NULL,             -- as executed
+    -- FALSE when binding the template did not reproduce `resolved_sql`. Not an error:
+    -- templates are allowed to approximate (§7). It is recorded so a refresh can say
+    -- which analyses reproduce exactly and which only roughly.
+    template_verified boolean,
+    duration_ms       integer,
+    row_count         integer,
+    error             text,
+    -- The window this query actually covered. A relative predicate moves it without
+    -- the specification changing, so it belongs to the run, not the analysis.
+    observed_date_from date,
+    observed_date_to   date,
+    -- Lets a refresh answer "did anything change?" without keeping the rows.
+    result_digest     text,
+    PRIMARY KEY (run_id, analysis_query_id)
+);
+CREATE INDEX ON analysis_run_queries (tool_use_id) WHERE tool_use_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------- reports
 -- One row per publish. Immutable: the PDF may already have been sent.
@@ -256,27 +310,47 @@ analysis, publish a new report pointing back at the old one. Nothing is overwrit
 
 ```sql
 -- the analyses behind report 88, in order, with their current bindings
-SELECT a.id, a.serial, a.sql_template, rc.position,
-       jsonb_object_agg(ap.name, jsonb_build_object('value', ap.value,
-                                                    'expression', ap.expression)) AS params
+SELECT a.id, a.serial, a.version, rc.position,
+       jsonb_agg(jsonb_build_object('seq', q.seq, 'primary', q.is_primary,
+                                    'sql', q.sql_template) ORDER BY q.seq) AS queries,
+       (SELECT jsonb_object_agg(ap.name, jsonb_build_object('value', ap.value,
+                                                            'expression', ap.expression))
+          FROM analysis_parameters ap WHERE ap.analysis_id = a.id) AS params
   FROM reports r
-  JOIN report_contents rc   ON rc.report_id = r.id
-  JOIN analysis_runs  ar    ON ar.id = rc.analysis_run_id
-  JOIN analyses       a     ON a.id = ar.analysis_id
-  LEFT JOIN analysis_parameters ap ON ap.analysis_id = a.id
+  JOIN report_contents rc ON rc.report_id = r.id
+  JOIN analysis_runs  ar  ON ar.id = rc.analysis_run_id
+  JOIN analyses       a   ON a.id = ar.analysis_id
+  JOIN analysis_queries q ON q.analysis_id = a.id
  WHERE r.serial = 88
- GROUP BY a.id, a.serial, a.sql_template, rc.position
+ GROUP BY a.id, a.serial, a.version, rc.position
  ORDER BY rc.position;
 ```
 
-A relative `expression` ("last 12 months") re-resolves against today; an absolute
-range does not move unless the user asks. That distinction is the whole reason
-`analysis_parameters` keeps both `value` and `expression` — a refresh cannot tell
-what the user meant from `2025-09-01` alone.
+**Refresh has exactly one behaviour: re-execute the specification unchanged.** No
+parameter is rewritten and the user is not asked anything.
+
+That works because relativity lives in the SQL, not in a binding. An analysis that
+means "the last twelve months" is written
+`WHERE contact_date >= DATEADD(month, -12, CURRENT_DATE)`, so re-running it covers a
+later window by construction. An analysis pinned to August 2026 binds those dates as
+parameters, and re-running it correctly returns the same window — a refresh should
+not silently move a period the user chose.
+
+So the two cases need no branch, no configuration and no prompt, and the
+`record_analysis` tool is where the distinction gets made: the agent writes a
+relative predicate or binds an absolute one, according to what the user asked for.
+
+Because the window can move without the specification changing, each run records the
+range each of its queries actually covered — `observed_date_from` /
+`observed_date_to` on `analysis_run_queries` — so two runs of the same analysis can be
+compared without re-reading their SQL. That is also what the
+footnote needs: `CLAUDE.md` requires an analysis to state its date range, and for a
+relative predicate that sentence is only true of the run that produced it, which is
+why `resolved_note` is stored per run rather than on the specification.
 
 `result_digest` then answers the question a refresh actually raises: *did anything
 change?* Comparing digests across two runs flags the analyses worth re-reading,
-without storing a single row of PHI.
+without keeping a copy of the data to diff.
 
 **2 — Build a report from an arbitrary set of analyses.** `report_contents` already
 allows it: run each chosen analysis afresh, then publish with
@@ -295,11 +369,18 @@ parameters, record the parent.
 
 ```sql
 WITH clone AS (
-  INSERT INTO analyses (origin_conversation_id, derived_from_id, title, subtitle,
-                        note_template, sql_template, chart_type, chart_spec, created_by)
-  SELECT $2, id, $3, subtitle, note_template, sql_template, chart_type, chart_spec, $4
+  -- A clone forks: new lineage, version 1, `derived_from_id` recording the parent.
+  INSERT INTO analyses (lineage_id, version, origin_conversation_id, derived_from_id,
+                        title, subtitle, note_template, chart_type, chart_spec, created_by)
+  SELECT gen_random_uuid(), 1, $2, id, $3, subtitle, note_template,
+         chart_type, chart_spec, $4
     FROM analyses WHERE serial = $1
   RETURNING id
+), copied_queries AS (
+  INSERT INTO analysis_queries (analysis_id, seq, purpose, is_primary, sql_template)
+  SELECT c.id, q.seq, q.purpose, q.is_primary, q.sql_template
+    FROM clone c, analyses a, analysis_queries q
+   WHERE a.serial = $1 AND q.analysis_id = a.id
 )
 INSERT INTO analysis_parameters (analysis_id, name, kind, value, expression, label)
 SELECT c.id, p.name, p.kind,
@@ -310,8 +391,8 @@ SELECT c.id, p.name, p.kind,
  WHERE a.serial = $1 AND p.analysis_id = a.id;
 ```
 
-The SQL text is untouched — only the bindings differ — so "the same analysis for a
-different patient population" is provably the same analysis.
+The SQL templates are copied verbatim — only the bindings differ — so "the same
+analysis for a different patient population" is recognisably the same analysis.
 
 ### And the questions the audit trail answers
 
@@ -330,6 +411,14 @@ SELECT r.serial, r.title, ar.freshness
   JOIN report_contents rc ON rc.report_id = r.id
   JOIN analysis_runs ar   ON ar.id = rc.analysis_run_id
  WHERE ar.freshness::text ILIKE '%STALE%';
+
+-- which analyses read a relation, without running anything: the question asked
+-- when a model is about to change or has gone stale
+SELECT a.serial, a.title, a.created_by
+  FROM analyses a
+  JOIN analysis_relations ar ON ar.analysis_id = a.id
+ WHERE ar.schema_name = 'gold' AND ar.relation_name = 'flowsheet_catalog'
+   AND a.archived_at IS NULL;
 
 -- resolve a figure someone quoted in an email
 SELECT r.title, r.storage_key, f.title
@@ -405,98 +494,362 @@ synthesises them from `turns`.
 **The full tool result.** Store the 240-character `preview` the UI shows and the full
 tool *input*; never the result body. See below — even the preview is not innocent.
 
-### This makes the transcript a PHI store
+### What a stored event actually contains
 
 `tool_use.summary` for `run_sql` is the SQL, and `tool_result.preview` is the first
-240 characters of the result — which for `run_sql` is
-`{"row_count": N, "rows": [{…` , i.e. real rows. A query against
-`gold.bpa_comments_v2` puts clinician free text into the preview, and therefore into
-`events.payload`.
+240 characters of the result — for `run_sql`, `{"row_count": N, "rows": [{…`, i.e.
+real rows. Under the no-PHI assumption that is fine and worth keeping: a replay that
+shows what came back is more useful than one that shows only a row count.
 
-So an `events` table is not a debug log with a different retention story from the
-reports; it holds the same class of data. Three options, and the choice is a policy
-one:
+It is also the single place that assumption is load-bearing. If a deployment ever
+queries data that is not safe to retain, `events.payload` is where it lands, and the
+fix is in `_preview` — redact at the point of creation so the live UI and the stored
+transcript agree, rather than bolting a filter onto the writer.
 
-1. **Store previews as they are** — replay is faithful, and `events` inherits the
-   PDFs' handling and retention rules.
-2. **Redact on write** — keep `row_count` and the column names, drop the values.
-   Replay shows "returned 500 rows" where the live UI showed data. Cheaper to hold,
-   and still enough to follow what the agent did.
-3. **Redact on read** — store fully, mask unless the viewer is the original
-   requester. Most faithful, most machinery.
+## 6. Resuming a conversation after a restart
 
-Option 2 is the one I would default to: the value of replay is seeing *what the agent
-did*, and a row preview is rarely the part that matters.
+Replay reconstructs the transcript for a human. Resuming needs the *model's* history
+back, in the CLI's own format, and that is a different problem with a purpose-built
+answer in the SDK.
 
-## 6. Decisions that are not mine to make
+**Today it cannot work.** The Claude Code subprocess writes transcripts under
+`CLAUDE_CONFIG_DIR`, which the Dockerfile sets to `/home/agent/.claude`. There is no
+volume for it in `infra/ecs-task-definition.json`, so a task replacement destroys
+every session. `ClaudeAgentOptions.resume` would then find nothing.
 
-**Query results are deliberately not stored.** `queries` keeps the SQL, timing and
-row count, never the rows. Results from this warehouse include PHI — `bpa_comments_v2`
-alone is 1.29M rows of clinician free text. Storing them would create a second PHI
-store with its own retention, access-control and breach surface, to enable a
-re-render that the archived PDF already provides.
-decision: do not store the query results
+**`ClaudeAgentOptions.session_store` is the mechanism.** Its contract:
 
-**`analysis_runs.result_digest` is the compromise that makes refresh useful without
-storing rows.** A hash of the result set tells you whether a refresh changed
-anything; it cannot reconstruct the data. Choose the digest so it cannot be used as
-a membership oracle for small result sets — salt it per deployment.
+> Mirror session transcripts to an external store. When set, every transcript line
+> written locally is also passed to `session_store.append()`, and `resume` can
+> materialize from the store when the local file is absent.
 
-**`reports.body_markdown` is the same question in a weaker form.** It holds the
-aggregates that went into the PDF, and small-cell aggregates can be identifying. It
-buys the ability to re-render a report after a template change. The PDF is already
-retained, so this is a convenience, not a recovery mechanism — I would leave the
-column but ship it unpopulated until someone has decided the retention period.
-decision: ok
+Only `append()` and `load()` are required, and the failure semantics are the ones
+this app wants: `append` is called **after** the local write has already succeeded,
+batches at roughly 100ms, retries three times, and on failure surfaces a
+`MirrorErrorMessage` while the subprocess continues unaffected. Persistence cannot
+take down a live conversation.
 
-**`figures.svg` is the milder version again**: a rendered chart contains the plotted
-values. Same trade, lower volume.
-decision: ok
+```sql
+-- The SDK's own transcript, mirrored. Not the same thing as `events`: this is the
+-- model's history in the CLI's format, written for `resume` to read back.
+CREATE TABLE sdk_transcript_entries (
+    session_id  text NOT NULL,
+    project_key text NOT NULL,           -- from project_key_for_directory(cwd)
+    -- Most entries carry a stable uuid the SDK asks adapters to treat as an
+    -- idempotency key. Entries without one (titles, tags, mode markers) append.
+    entry_uuid  uuid,
+    seq         bigint NOT NULL GENERATED ALWAYS AS IDENTITY,
+    entry       jsonb NOT NULL,
+    written_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX ON sdk_transcript_entries (session_id, entry_uuid)
+    WHERE entry_uuid IS NOT NULL;
+CREATE INDEX ON sdk_transcript_entries (session_id, seq);
+```
 
-**Retention and deletion are unspecified here.** `ON DELETE CASCADE` from
-`conversations` means deleting a conversation destroys its reports' metadata while
-the PDFs survive in object storage — probably the wrong way round. Decide the
-retention policy first, then set the cascades to match it.
-decision: do not worry about this 
+`load()` returns the entries for a session in `seq` order. Deep equality is enough —
+the SDK never byte-compares, so `jsonb` key reordering is fine, which is stated
+explicitly in the protocol.
 
----
+Then resuming is:
 
-## 7. What this does not cover
+```python
+ClaudeAgentOptions(
+    resume=conversation.sdk_session_id,   # already on `conversations`
+    session_store=PostgresSessionStore(pool),
+    ...
+)
+```
 
-**The agent cannot produce any of this yet, and that is the critical path.** Its only
-structured output is `publish_report(title, subtitle, body_markdown)` — prose with a
-SQL appendix. A specification with named parameters cannot be recovered from that:
-parsing free SQL to decide which literal is "the patient population" and which is
-incidental is guesswork, and it fails silently.
+and `CLAUDE_CONFIG_DIR` should move to `/tmp`, which the protocol suggests: the local
+copy becomes an explicitly ephemeral scratch file rather than something that looks
+durable and is not.
 
-So features 1 and 3 need a `record_analysis` tool the agent calls as it works,
-declaring the template, the parameters (with their intent, not just their values),
-the relations read and the chart spec. Feature 2 needs only what `record_analysis`
-already produces. **Build that tool first** — the schema is inert without it, and its
-shape is what decides whether these columns hold anything real.
+### Why both this and `events`
 
-A useful consequence: the same tool is what lets a chart be rendered from data by
-code rather than drawn by the model, which is the standing chart problem too.
+They answer different questions and neither derives safely from the other.
+`sdk_transcript_entries` is the CLI's internal format, whose shape is not a contract
+we control — building the replay UI on it would break on a CLI upgrade. `events` is
+our own wire format, which the front end already renders. The cost is that the conversation is stored
+twice, in two formats — acceptable, but worth knowing before someone wonders why a
+conversation appears in both.
 
-**Re-execution semantics are unspecified.** Whether a refresh re-resolves relative
-date expressions, or shifts absolute windows forward by their own length, or asks —
-that is a product decision. `analysis_parameters` records enough to implement any of
-them; it does not choose.
+## 7. Recommendations on the open decisions
 
-**Migrations.** No tool chosen; the app has no database dependency today.
+Each of these is reversible in principle and painful in practice, so here is what I
+would pick and why.
 
-**Writing the event stream.** `AgentSession.send()` is an async generator consumed by
-the WebSocket handler; persisting from inside it couples the agent loop to the
-database, and a write failure there would break a live conversation. A second
-consumer — or a queue the handler feeds — keeps replay from being able to take the
-app down. Unresolved.
+**Cascades — stop cascading from `conversations`.** As drafted, deleting a
+conversation destroys its reports' metadata while the PDFs live on in object storage:
+the artefact survives and the record of who produced it does not, which is the wrong
+way round for anything auditable. Change `reports` and `analysis_runs` to
+`ON DELETE RESTRICT` and never hard-delete a conversation — add
+`conversations.deleted_at` and filter on it.
 
-**Replaying a conversation is not resuming it.** The schema reconstructs the
-transcript; it does not restore the `ClaudeSDKClient` that produced it. Continuing a
-past conversation is a different feature, and the SDK's own `resume` and
-`session_id` are the mechanism for it — `conversations.sdk_session_id` is already
-recorded with that in mind.
+**Event redaction — none, per the standing assumption.** Store previews whole. The
+one thing to keep in view: if that assumption stops holding, redact inside `_preview`
+rather than in the writer, so the live UI and the stored transcript never disagree
+about what was returned.
 
-**Concurrency on refresh.** Re-running twenty analyses against Snowflake is twenty
-queries with no user waiting on them. That wants a job queue, not a request handler,
-and nothing here models job state.
+**`result_digest` — HMAC-SHA256 with a per-deployment key** over the canonicalised
+result. The key costs nothing and keeps the digest from being a membership oracle for
+small result sets, which is cheap insurance whatever the data turns out to be.
+
+**Driver and migrations — `asyncpg` with SQLAlchemy Core, and Alembic.** The app is
+async FastAPI throughout; a sync driver would need `to_thread` for every write, which
+is the pattern already causing the unbounded-query problem in `snowflake_sql.py`.
+Core rather than the ORM because this schema is written against, not navigated, and
+the interesting queries in §4 are ones you want to write in SQL. Alembic because the
+alternative is hand-ordered `.sql` files and a convention nobody follows after month
+three.
+
+**Where writes happen — a queue and a background writer.** `AgentSession.send()` must
+not await Postgres: a write failure there breaks a live conversation over data that
+is only wanted afterwards. The SDK's own `SessionStore` contract is the model to
+copy — append after the fact, batch, retry three times, surface the error, let the
+conversation continue. Use the same shape for `events`: `send()` puts the event on an
+`asyncio.Queue` and returns; a task drains it. Accept that a hard crash loses the
+tail of the last turn, because the alternative is a database outage taking the
+product down.
+
+**Resume — implement `SessionStore` (§6), and move `CLAUDE_CONFIG_DIR` to `/tmp`.**
+Storing `sdk_session_id` is necessary and not sufficient; without the mirrored
+transcript, `resume` has nothing to load once the task is replaced.
+
+**`record_analysis` — design the tool before the DDL.** Suggested shape, since it is
+what fixes half these column types:
+
+```python
+record_analysis(
+    title, subtitle, note_template,
+    queries,          # [{tool_use_id, sql_template, purpose, primary: bool}] — in order
+    parameters,       # [{name, kind, value, expression, label}]
+    relations,        # ["gold.order_events_expanded", …]
+    joins,            # [{left, right, verified, match_pct}]
+    chart_type=None, chart_spec=None,
+    supersedes=None,  # 'A-1042' when correcting: makes version 2, not a new analysis
+) -> analysis_label   # 'A-1042.1', which the agent then cites in the body
+```
+
+**Adopt, do not execute.** Each entry in `queries` names the `tool_use_id` of a
+`run_sql` the agent has already made, so the server binds the specification to
+results it already holds rather than running everything twice. That needs a small
+per-conversation cache of recent `run_sql` results — bounded anyway, since `run_sql`
+caps at `SQL_ROW_LIMIT` rows. If a `tool_use_id` has fallen out of the cache, fall
+back to executing the template; a refresh takes that path by definition, which is
+what `analysis_runs.origin` records.
+
+**The template may approximate.** Binding the parameters need not reproduce the
+executed SQL byte for byte. The server compares anyway and stores the result in
+`analysis_run_queries.template_verified` — not to reject the call, but so that a
+refresh can say which analyses reproduce exactly and which only roughly. Silent
+approximation is the thing to avoid, not approximation.
+
+**Corrections make a version.** `supersedes='A-1042'` writes a new `analyses` row
+sharing the lineage with `version = 2`. The old row is untouched, because a published
+report points at a run whose specification must stay exactly as it was. A clone
+(feature 3) is the other relationship: new lineage, `derived_from_id` set.
+
+It returns the label, so the agent writes it into the report body and the
+figure/analysis linkage is established by the server rather than asserted by the
+model — the same principle as the download URL and the figure SVG.
+
+**Recording is independent of publishing.** Plenty of conversations end with the user
+having got what they needed and no PDF produced; those analyses are still worth
+keeping, and they are what feature 2 later picks from. So the cart is simply the set
+of recorded analyses on a conversation, and `publish_report` selects an ordered subset
+of it:
+
+```python
+publish_report(title, subtitle, body_markdown,
+               analyses)   # ordered labels: ['A-1042.1', 'A-1043.1']
+```
+
+**`publish_report` refuses a body whose analyses were not recorded**, and the refusal
+is written to be actionable rather than merely correct — the agent reads it and fixes
+itself, the way a Snowflake error already teaches it a column name:
+
+> Rejected: `analyses` is empty, but `body_markdown` has 3 `##` sections. Every
+> analysis in a report must be recorded first. For each one call
+> `record_analysis(title, subtitle, note_template, queries=[{tool_use_id, sql_template,
+> purpose, primary}], parameters, relations, joins, chart_type, chart_spec)` — pass
+> the `tool_use_id` of the `run_sql` calls you already made, so nothing is re-run. It
+> returns a label like `A-1042.1`. Then call `publish_report` again with those labels
+> in `analyses`, in the order they appear in the body.
+
+The check is: `analyses` is non-empty, every label resolves to an analysis recorded in
+this conversation, and the count matches the number of `##` sections in the body. The
+last of those is a heuristic and should warn rather than reject — a report may
+legitimately carry a section that is not an analysis.
+
+**Where this is heading.** Once an analysis carries its own title, subtitle, footnote
+and chart, the body no longer needs to contain them: the server can render the report
+from the ordered list of analyses, and the agent supplies only the connecting prose.
+That is how the chart and footnote standards stop being instructions in `CLAUDE.md`
+and become properties of the output. Not a step to take at the same time as this one,
+but the reason to keep `body_markdown` and `analyses` as separate arguments rather
+than parsing one out of the other.
+
+## 8. Implementation plan
+
+Local Postgres only. Nothing here provisions cloud infrastructure; the point is a
+working, required persistence layer a contributor can stand up in five minutes.
+
+### 8.1 Stage one — the walking skeleton
+
+Pay the plumbing cost once, on one table, before writing eleven against assumptions
+that may be wrong. Done when a conversation row is written and read back end to end,
+in the app and in the tests.
+
+**Dependencies.** `requirements.txt` gains:
+
+```
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+alembic>=1.13
+```
+
+Core rather than the ORM: this schema is written against, not navigated, and the
+queries in §4 are ones you want to read as SQL.
+
+**A database to talk to.** `docker-compose.yml` gains a service, and the app service
+gains a dependency on it:
+
+```yaml
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: report_agent
+      POSTGRES_USER: report_agent
+      POSTGRES_PASSWORD: report_agent     # local only; prod reads a secret
+    ports: ["5432:5432"]
+    volumes: [report_agent_pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U report_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  report_agent_pg:
+```
+
+and on `report-agent`:
+
+```yaml
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql+asyncpg://report_agent:report_agent@postgres:5432/report_agent
+```
+
+**Configuration.** `app/config.py` gains `database_url` and `db_pool_size`, and
+`.env.example` documents them. Because persistence is required, an unset
+`DATABASE_URL` is a startup failure with a message naming the compose command — not
+a silent fallback to in-memory, which would look like it worked.
+
+**Lifecycle.** The engine and pool are created in the existing `lifespan` in
+`app/main.py`, beside the session reaper, and disposed in its `finally`. `/healthz`
+runs `SELECT 1`; a database that is down makes the app unhealthy, which is the
+correct signal now that it cannot work without one.
+
+**Migrations.** `alembic init`, with `env.py` pointed at `settings.database_url` and
+`sqlalchemy.url` left out of `alembic.ini` so the credential is never committed.
+Migrations are run as a deliberate step (`alembic upgrade head`), never on startup —
+on startup is convenient until two tasks race the same migration.
+
+**Tests.** They currently need no network and no services, which is worth keeping as
+close to true as it can be. A session-scoped fixture creates a uniquely-named
+database, runs `alembic upgrade head` against it, and drops it at the end; each test
+gets a transaction that is rolled back. `conftest.py` skips the database tests with a
+clear message when nothing is listening on 5432, so `pytest` still tells a contributor
+what to start rather than erroring obscurely.
+
+**The one table.** `conversations` and its migration, a thin repository module, and
+`SessionManager.create()` writing a row. Read it back in `GET /conversations/{id}`.
+
+### 8.2 Stage two — the schema
+
+In dependency order, each with its own migration:
+
+1. `turns` and `events` — they need only what the app already emits, so they can land
+   before `record_analysis` exists and immediately make replay possible.
+2. The event queue and background writer (§7). `send()` enqueues and returns;
+   a task drains. Do this with `events`, not after it, or the coupling gets baked in.
+3. `analyses`, `analysis_queries`, `analysis_parameters`, `analysis_relations`,
+   `analysis_joins`, `analysis_runs`, `analysis_run_queries` — blocked on the
+   `record_analysis` tool. Revisit the deferred read-back change (§9) once this
+   lands: it is cheap here and awkward later.
+4. `reports`, `report_contents`, `figures` — `publish_report` writes them; figures
+   need the chart work.
+5. `sdk_transcript_entries` and the `SessionStore` adapter, plus moving
+   `CLAUDE_CONFIG_DIR` to `/tmp`.
+
+### 8.3 What this changes elsewhere
+
+- **`README.md`** — "Run locally in 60 seconds (no credentials)" becomes a five-minute
+  path that starts `docker compose up -d postgres` and runs `alembic upgrade head`.
+  The mock-mode promise survives; the no-dependencies promise does not.
+- **`Dockerfile`** — no change; the app reaches Postgres over the network.
+- **`infra/ecs-task-definition.json`** — out of scope here, and deliberately so.
+
+### 8.4 Deferred until there is more than one instance
+
+Connection limits and a pooler, read replicas, backups and restore drills, migration
+gating in CI, and anything to do with a managed database. All of it is real work; none
+of it is needed to build and prove the schema locally.
+
+## 9. Still open
+
+The execution model, granularity, template fidelity, correction semantics, cart
+membership and the publish gate are all decided (§7). What remains:
+
+**What is a parameter, and what is structure.** A cohort filter clearly is. The
+grouping column, the date field, a `top N` cutoff — less clear, and if everything
+becomes a parameter the clone picker is unusable. The `kind` enum is where to draw
+the line, but the values are not chosen yet, and the agent needs a rule it can apply
+without asking every time.
+
+**Reading back from the cart — outlined, deliberately deferred.**
+
+Today the read-back is recollection: `CLAUDE.md` asks the agent to list each analysis
+with its title, what it shows, its visualization and its filters, and the agent
+composes that from memory. Nothing checks it against what was actually run, so it can
+drift — describing three analyses when two were computed, or naming a bar chart it
+does not then produce.
+
+Once the cart is real, the read-back can be a rendering of it instead. The change is
+four small pieces:
+
+1. `CLAUDE.md` instructs the agent to call `record_analysis` **as each analysis
+   completes**, not at publish time, so the cart is populated before the read-back.
+2. A `list_analyses()` tool returns this conversation's cart — label, title,
+   visualization, bound parameters — so the agent reads from state rather than memory.
+   (It is also what feature 2's picker needs, so it is not single-purpose.)
+3. The read-back becomes a rendering of that list. The requirement that every analysis
+   names its visualization stops being an instruction the agent might skip and becomes
+   a column that is either populated or not.
+4. `publish_report`'s gate tightens: the labels in `analyses` must be ones the agent
+   read back, which closes the gap between what the user approved and what gets
+   published.
+
+**Why not now.** It depends on `record_analysis` (§8.2 step 3) and on the cart being
+persisted, so it cannot be built before either. Writing the `CLAUDE.md` instructions
+now would describe a tool that does not exist, and the prose read-back works in the
+meantime. Revisit when step 3 lands — the cost is small at that point and the drift it
+removes is the kind a reader cannot see.
+
+**The shape of `chart_spec`.** It is `jsonb` with no schema. An `hbar` needs a label
+column and a value column; a line chart needs x, series and value. Either the agent
+maps result columns to channels, or the server infers from the primary query's result
+shape and column types. Inferring fails in a narrower way, but only if `charts.py`
+declares what each form requires.
+
+**How figure labels reach the report body.** `record_analysis` returns `A-1042.1`,
+but a figure is `R-88-03` and the report serial does not exist until publish. So the
+body carries placeholders resolved at render — the same substitution the chart SVG
+needs, and worth building once.
+
+**Concurrency on refresh.** Re-running twenty analyses is twenty Snowflake queries
+with no user waiting. That wants a job queue, not a request handler, and nothing here
+models job state. It blocks nothing in §8.
