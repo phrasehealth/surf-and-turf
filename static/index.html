@@ -39,6 +39,13 @@
      recovers on its own. Connection and agent errors are not steps and stay. */
   body:not(.show-steps) .tool,
   body:not(.show-steps) .error.step { display: none; }
+  /* Temporary: the database is chosen per conversation until it becomes a property
+     of the signed-in session. Disabled once a conversation is running, because it
+     cannot change. */
+  header .picker select { font: inherit; font-size: 12px; padding: 3px 6px;
+                          border: 1px solid var(--line); border-radius: 6px;
+                          background: var(--panel); color: var(--ink); }
+  header .picker select:disabled { opacity: .65; cursor: not-allowed; }
   header .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
                    color: var(--muted); cursor: pointer; user-select: none; }
   header .toggle input { margin: 0; cursor: pointer; }
@@ -85,6 +92,9 @@
 <header>
   <h1>Report Agent</h1>
   <div class="status" id="status">connecting…</div>
+  <label class="picker" title="The database this conversation queries. Fixed once it starts.">
+    <select id="dbPicker"></select>
+  </label>
   <label class="toggle" title="Show the agent's tool calls (run_sql, Read, Grep…)">
     <input type="checkbox" id="stepsToggle"> Agent steps
   </label>
@@ -186,6 +196,7 @@
   function handle(ev) {
     switch (ev.type) {
       case 'hello': setBusy(false); (ev.reports || []).forEach(addReport);
+        if (ev.database) note('meta', `Querying ${ev.database}. A conversation cannot change database — start a new one to query another.`);
         if (ev.agent_mode === 'mock') note('meta', 'Running in mock mode (AGENT_MODE=mock): scripted agent, sample data.'); break;
       case 'turn_start': current = null; break;
       case 'text_delta': hideThinking();
@@ -206,11 +217,33 @@
     }
   }
 
+  const dbPicker = document.getElementById('dbPicker');
+
+  async function loadDatabases() {
+    try {
+      const { databases } = await (await fetch('/databases')).json();
+      dbPicker.innerHTML = (databases || []).map(d => `<option>${esc(d)}</option>`).join('')
+        || '<option value="">(none available)</option>';
+      const last = localStorage.getItem('database');
+      if (last && databases.includes(last)) dbPicker.value = last;
+    } catch (e) { dbPicker.innerHTML = '<option value="">(unavailable)</option>'; }
+  }
+
   async function start() {
     log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
     if (ws) { ws.onclose = null; ws.close(); }
     status.textContent = 'connecting…';
-    const r = await fetch('/conversations', { method: 'POST' }); cid = (await r.json()).conversation_id;
+    const database = dbPicker.value;
+    if (!database) { note('error', 'no database available to query'); return; }
+    localStorage.setItem('database', database);
+    const r = await fetch('/conversations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database }),
+    });
+    if (!r.ok) { note('error', JSON.stringify((await r.json()).detail)); return; }
+    cid = (await r.json()).conversation_id;
+    // Fixed for the life of the conversation: every query is checked against it.
+    dbPicker.disabled = true;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws/${cid}`);
     ws.onmessage = e => handle(JSON.parse(e.data));
@@ -224,7 +257,10 @@
   });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('form').requestSubmit(); } });
   input.addEventListener('input', () => { input.style.height = ''; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; });
-  document.getElementById('newBtn').addEventListener('click', start);
+  document.getElementById('newBtn').addEventListener('click', () => {
+    dbPicker.disabled = false;      // a new conversation may pick a different one
+    start();
+  });
   start();
 })();
 </script>

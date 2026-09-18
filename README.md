@@ -217,6 +217,9 @@ scheduled job rather than every start.
   matters because `run_sql` puts free-text clinician content into the model's context,
   and the container holds the Snowflake key and AWS credentials.
 - SQL is validated read-only and row-capped in code; the Snowflake role must also be read-only.
+- A conversation is bound to one database when it starts and cannot change it. The
+  restriction is applied to every statement, not just the connection, because a
+  fully-qualified name bypasses the connection's default.
 - Container runs as a non-root user; secrets never go in the image.
 - The pack ships in the image and contains schema metadata, not data — except
   `qcp/profiles/`, which carries sample column values and is only built on request.

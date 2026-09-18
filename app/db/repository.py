@@ -25,12 +25,13 @@ SKIP_EVENT_TYPES = {"text_delta", "turn_start", "turn_end", "hello", "preset"}
 
 # --------------------------------------------------------------- conversations
 
-async def create_conversation(conversation_id: str, user_id: str | None) -> None:
+async def create_conversation(conversation_id: str, user_id: str | None,
+                              database: str = "") -> None:
     async with db.begin() as conn:
         await conn.execute(text(
-            "INSERT INTO conversations (id, user_id) VALUES (:id, :user_id)"
-            " ON CONFLICT (id) DO NOTHING"
-        ), {"id": conversation_id, "user_id": user_id})
+            "INSERT INTO conversations (id, user_id, database)"
+            " VALUES (:id, :user_id, :database) ON CONFLICT (id) DO NOTHING"
+        ), {"id": conversation_id, "user_id": user_id, "database": database or None})
 
 
 async def touch_conversation(conversation_id: str) -> None:
@@ -50,15 +51,16 @@ async def close_conversation(conversation_id: str) -> None:
 async def get_conversation(conversation_id: str) -> dict[str, Any] | None:
     async with db.begin() as conn:
         row = (await conn.execute(text(
-            "SELECT id, serial, user_id, sdk_session_id, started_at, last_used_at,"
-            "       closed_at, total_cost_usd, total_turns"
+            "SELECT id, serial, user_id, database, sdk_session_id, started_at,"
+            "       last_used_at, closed_at, total_cost_usd, total_turns"
             "  FROM conversations WHERE id = :id AND deleted_at IS NULL"
         ), {"id": conversation_id})).mappings().first()
     return dict(row) if row else None
 
 
 async def list_conversations(user_id: str | None, limit: int = 50) -> list[dict[str, Any]]:
-    sql = ("SELECT c.id, c.serial, c.user_id, c.started_at, c.last_used_at, c.total_cost_usd,"
+    sql = ("SELECT c.id, c.serial, c.user_id, c.database, c.started_at, c.last_used_at,"
+           "       c.total_cost_usd,"
            "       (SELECT count(*) FROM turns t WHERE t.conversation_id = c.id) AS turns,"
            "       (SELECT count(*) FROM reports r WHERE r.origin_conversation_id = c.id)"
            "         AS reports"

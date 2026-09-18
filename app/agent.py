@@ -94,9 +94,14 @@ def _preview(content: Any, limit: int = 240) -> str:
 
 class AgentSession:
     def __init__(self, conversation_id: str, user_id: str | None = None,
-                 sdk_session_id: str | None = None):
+                 sdk_session_id: str | None = None, database: str = ""):
         self.id = conversation_id
         self.user_id = user_id
+        # Chosen when the conversation starts and fixed for its life. Every statement
+        # is checked against it, because a fully-qualified name would otherwise walk
+        # straight out of the database the user picked. Eventually this comes from the
+        # signed-in user's session rather than from the request.
+        self._database = (database or "").strip()
         # Set when reviving a conversation whose process is gone: the transcript is
         # mirrored to Postgres, so `resume` can materialise it (docs §6).
         self.sdk_session_id = sdk_session_id
@@ -108,6 +113,11 @@ class AgentSession:
         self.results = ResultCache()
         self._client = None
         self._pending_reports: asyncio.Queue[Event] = asyncio.Queue()
+
+    @property
+    def database(self) -> str:
+        """Read-only on purpose: a conversation cannot change database mid-flight."""
+        return self._database
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -121,9 +131,11 @@ class AgentSession:
     def _build_options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, create_sdk_mcp_server
 
-        tools = snowflake_sql.build_tools(self.results) + [
-            record_tool.build_tool(self.id, self.results, author=self.user_id),
-            publish_tool.build_tool(self.id, self._on_published, author=self.user_id),
+        tools = snowflake_sql.build_tools(self.results, self._database) + [
+            record_tool.build_tool(self.id, self.results, author=self.user_id,
+                                   database=self._database),
+            publish_tool.build_tool(self.id, self._on_published, author=self.user_id,
+                                    database=self._database),
         ]
         server = create_sdk_mcp_server(MCP_SERVER_NAME, version="1.0.0", tools=tools)
         mcp_tool_names = [f"mcp__{MCP_SERVER_NAME}__{t.name}" for t in tools]
@@ -237,9 +249,12 @@ class MockAgentSession(AgentSession):
     async def start(self) -> None:
         self._client = object()  # sentinel: "started"
         # The same cache the real session uses, so the mock exercises the adopt path.
-        self._sql_tools = {t.name: t for t in snowflake_sql.build_tools(self.results)}
-        self._record = record_tool.build_tool(self.id, self.results, author=self.user_id)
-        self._publish = publish_tool.build_tool(self.id, self._on_published, author=self.user_id)
+        self._sql_tools = {t.name: t
+                           for t in snowflake_sql.build_tools(self.results, self._database)}
+        self._record = record_tool.build_tool(self.id, self.results, author=self.user_id,
+                                              database=self._database)
+        self._publish = publish_tool.build_tool(self.id, self._on_published,
+                                                author=self.user_id, database=self._database)
 
     async def close(self) -> None:
         self._client = None
@@ -341,10 +356,12 @@ class MockAgentSession(AgentSession):
 class SessionManager:
     sessions: dict[str, AgentSession] = field(default_factory=dict)
 
-    def create(self, user_id: str | None = None) -> AgentSession:
+    def create(self, user_id: str | None = None, database: str = "") -> AgentSession:
+        if not database:
+            raise ValueError("a conversation must name the database it queries")
         cid = str(uuid.uuid4())
         cls = AgentSession if settings.agent_mode == "sdk" else MockAgentSession
-        s = cls(cid, user_id=user_id)
+        s = cls(cid, user_id=user_id, database=database)
         self.sessions[cid] = s
         return s
 
@@ -366,7 +383,9 @@ class SessionManager:
         if row is None:
             return None
         cls = AgentSession if settings.agent_mode == "sdk" else MockAgentSession
-        s = cls(cid, user_id=row.get("user_id"))
+        # The database is restored, never re-chosen: a revived conversation must
+        # keep querying what it was bound to.
+        s = cls(cid, user_id=row.get("user_id"), database=row.get("database") or "")
         s.sdk_session_id = row.get("sdk_session_id")
         self.sessions[cid] = s
         log.info("revived conversation %s (sdk_session=%s)", cid[:8],

@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (Body, FastAPI, HTTPException, Request, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,6 +79,36 @@ async def index():
     return (STATIC / "index.html").read_text()
 
 
+_DB_CACHE: dict[str, Any] = {"at": 0.0, "names": []}
+
+
+async def _selectable_databases() -> list[str]:
+    """What the configured role can actually use, cached briefly.
+
+    Mock mode has no catalogue to ask, so it offers a single stand-in rather than
+    blocking the offline path.
+    """
+    if settings.snowflake_mode != "real":
+        # The database the mock fixtures live in, so the same guard applies offline.
+        from .tools.snowflake_sql import MockBackend
+
+        return sorted({t.split(".")[0] for t in MockBackend.TABLES})
+    if time.time() - _DB_CACHE["at"] < 300 and _DB_CACHE["names"]:
+        return _DB_CACHE["names"]
+    from .tools.snowflake_sql import SnowflakeBackend
+
+    try:
+        rows = await SnowflakeBackend().run(
+            "SELECT database_name FROM snowflake.information_schema.databases "
+            "ORDER BY 1")
+        names = [r["DATABASE_NAME"] for r in rows]
+    except Exception as exc:
+        log.warning("could not list databases: %s", exc)
+        return _DB_CACHE["names"]
+    _DB_CACHE.update(at=time.time(), names=names)
+    return names
+
+
 @app.get("/healthz")
 async def healthz():
     # Persistence is required, so a database that is down means the app cannot do
@@ -89,11 +122,40 @@ async def healthz():
     )
 
 
+@app.get("/databases")
+async def list_databases():
+    """Databases a conversation may be started against.
+
+    Temporary: this asks Snowflake what the configured role can see. It becomes a
+    property of the signed-in user's session, at which point the choice is made for
+    the user rather than offered to them.
+    """
+    return {"databases": await _selectable_databases()}
+
+
 @app.post("/conversations")
-async def create_conversation(request: Request):
-    s = manager.create(user_id=_user(request.headers))
-    await repository.create_conversation(s.id, s.user_id)
-    return {"conversation_id": s.id}
+async def create_conversation(request: Request, body: dict | None = Body(default=None)):
+    """Start a conversation against one database.
+
+    The database is required and cannot change afterwards: it is enforced on every
+    statement, so it is part of what a conversation *is*, not a setting it carries.
+    """
+    database = str((body or {}).get("database") or "").strip()
+    if not database:
+        available = await _selectable_databases()
+        raise HTTPException(400, {
+            "error": "a database is required to start a conversation",
+            "databases": available,
+        })
+    allowed = await _selectable_databases()
+    if allowed and database not in allowed:
+        raise HTTPException(400, {
+            "error": f"{database!r} is not available to this role",
+            "databases": allowed,
+        })
+    s = manager.create(user_id=_user(request.headers), database=database)
+    await repository.create_conversation(s.id, s.user_id, database)
+    return {"conversation_id": s.id, "database": database}
 
 
 @app.get("/conversations")
@@ -112,7 +174,8 @@ async def get_conversation(cid: str):
     live = manager.get(cid)
     reports = live.reports if live else await repository.list_reports(cid)
     return {"conversation_id": cid, "serial": row["serial"], "reports": reports,
-            "created_at": row["started_at"], "live": live is not None}
+            "database": row.get("database"), "created_at": row["started_at"],
+            "live": live is not None}
 
 
 @app.get("/conversations/{cid}/transcript")
@@ -146,7 +209,9 @@ async def ws(websocket: WebSocket, cid: str):
         return
     await websocket.accept()
     await websocket.send_json({"type": "hello", "conversation_id": cid,
-                               "agent_mode": settings.agent_mode, "reports": session.reports})
+                               "agent_mode": settings.agent_mode,
+                               "database": session.database,
+                               "reports": session.reports})
     try:
         while True:
             data = await websocket.receive_json()

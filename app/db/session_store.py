@@ -23,24 +23,39 @@ from .engine import db
 log = logging.getLogger("report-agent.db.session_store")
 
 
-def _key_parts(key: Any) -> tuple[str, str]:
-    """SessionKey is (project_key, session_id) in either object or tuple form."""
-    session_id = getattr(key, "session_id", None)
-    project_key = getattr(key, "project_key", None)
-    if session_id is None and isinstance(key, (tuple, list)) and len(key) >= 2:
-        project_key, session_id = key[0], key[1]
-    return str(project_key or ""), str(session_id or "")
+def _key_parts(key: Any) -> tuple[str, str, str]:
+    """(project_key, session_id, subpath) from the SDK's SessionKey.
+
+    SessionKey is a TypedDict, so at runtime it is a plain dict — an attribute
+    lookup silently yields nothing and every append becomes a no-op. Attribute
+    access is kept only as a fallback for a hand-rolled key in a test.
+
+    `subpath` distinguishes a subagent's transcript from the main one. It is opaque:
+    store it, do not interpret it. Without it, a subagent's entries would collide
+    with the session's own.
+    """
+    if isinstance(key, dict):
+        return (str(key.get("project_key") or ""), str(key.get("session_id") or ""),
+                str(key.get("subpath") or ""))
+    return (str(getattr(key, "project_key", "") or ""),
+            str(getattr(key, "session_id", "") or ""),
+            str(getattr(key, "subpath", "") or ""))
+
+
+def _storage_key(session_id: str, subpath: str) -> str:
+    """Subagent transcripts live under the same session but must not collide."""
+    return f"{session_id}::{subpath}" if subpath else session_id
 
 
 class PostgresSessionStore:
     """Mirrors SDK transcripts so a conversation can be resumed after a restart."""
 
     async def append(self, key: Any, entries: list[dict[str, Any]]) -> None:
-        project_key, session_id = _key_parts(key)
+        project_key, session_id, subpath = _key_parts(key)
         if not session_id or not entries:
             return
         rows = [{
-            "session_id": session_id,
+            "session_id": _storage_key(session_id, subpath),
             "project_key": project_key,
             # Entries carrying a uuid are deduplicated; those without (titles, tags,
             # mode markers) are appended as-is, per the SDK's contract.
@@ -62,9 +77,10 @@ class PostgresSessionStore:
         Deep equality is enough: the SDK never byte-compares, so jsonb key
         reordering is harmless.
         """
-        _, session_id = _key_parts(key)
+        _, session_id, subpath = _key_parts(key)
         if not session_id:
             return None
+        session_id = _storage_key(session_id, subpath)
         async with db.begin() as conn:
             rows = (await conn.execute(text(
                 "SELECT entry FROM sdk_transcript_entries"
@@ -77,7 +93,8 @@ class PostgresSessionStore:
         return list(rows)
 
     async def delete(self, key: Any) -> None:
-        _, session_id = _key_parts(key)
+        _, session_id, subpath = _key_parts(key)
+        session_id = _storage_key(session_id, subpath)
         async with db.begin() as conn:
             await conn.execute(text(
                 "DELETE FROM sdk_transcript_entries WHERE session_id = :sid"

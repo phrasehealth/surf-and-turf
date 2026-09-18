@@ -176,7 +176,7 @@ def test_writer_persists_a_batch_in_order(db_conn, run):
 
 def test_session_store_round_trips_and_deduplicates(db_conn, run):
     store = PostgresSessionStore()
-    key = type("K", (), {"project_key": "proj", "session_id": "sess-1"})()
+    key = {"project_key": "proj", "session_id": "sess-1"}   # a TypedDict is a dict
     entries = [{"uuid": str(uuid.uuid4()), "type": "user", "text": "hi"},
                {"uuid": str(uuid.uuid4()), "type": "assistant", "text": "hello"},
                {"type": "title", "value": "no uuid, appended as-is"}]
@@ -187,12 +187,12 @@ def test_session_store_round_trips_and_deduplicates(db_conn, run):
     loaded = run(store.load(key))
     assert len(loaded) == 3, "uuid-bearing entries deduplicate, others append"
     assert loaded[0]["text"] == "hi"
-    assert run(store.load(type("K", (), {"project_key": "p", "session_id": "nope"})())) is None
+    assert run(store.load({"project_key": "p", "session_id": "nope"})) is None
 
 
 def test_session_store_load_preserves_write_order(db_conn, run):
     store = PostgresSessionStore()
-    key = type("K", (), {"project_key": "p", "session_id": "ordered"})()
+    key = {"project_key": "p", "session_id": "ordered"}
     for i in range(6):
         run(store.append(key, [{"uuid": str(uuid.uuid4()), "n": i}]))
     assert [e["n"] for e in run(store.load(key))] == [0, 1, 2, 3, 4, 5]
@@ -270,3 +270,16 @@ def test_every_report_can_have_its_own_figure_1(db_conn, run):
 
     with pytest.raises(Exception):               # two Figure 1s in ONE report
         run(_duplicate_serial())
+
+
+def test_session_store_keeps_subagent_transcripts_apart(db_conn, run):
+    """A subagent's entries must not collide with the session's own."""
+    store = PostgresSessionStore()
+    main = {"project_key": "p", "session_id": "s1"}
+    sub = {"project_key": "p", "session_id": "s1", "subpath": "subagents/agent-7"}
+
+    run(store.append(main, [{"uuid": str(uuid.uuid4()), "who": "main"}]))
+    run(store.append(sub, [{"uuid": str(uuid.uuid4()), "who": "subagent"}]))
+
+    assert [e["who"] for e in run(store.load(main))] == ["main"]
+    assert [e["who"] for e in run(store.load(sub))] == ["subagent"]

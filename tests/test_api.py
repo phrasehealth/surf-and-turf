@@ -30,7 +30,7 @@ def client(migrated_database):
 def test_conversation_roundtrip_publishes_pdf(tmp_path, client):
     if True:
         c = client
-        cid = c.post("/conversations").json()["conversation_id"]
+        cid = c.post("/conversations", json={"database": "ANALYTICS"}).json()["conversation_id"]
         with c.websocket_connect(f"/ws/{cid}") as ws:
             assert ws.receive_json()["type"] == "hello"
             ws.send_json({"prompt": "generate the report as a pdf"})
@@ -56,3 +56,23 @@ def test_download_rejects_traversal(client):
         c = client
         assert c.get("/reports/..%2Fapp%2Fmain.py").status_code in (404, 422)
         assert c.get("/reports/nope.pdf").status_code == 404
+
+
+def test_a_conversation_must_name_a_database(client):
+    """The database is part of what a conversation is, not an optional setting."""
+    r = client.post("/conversations", json={})
+    assert r.status_code == 400
+    assert "database is required" in str(r.json())
+
+
+def test_an_unavailable_database_is_refused(client):
+    r = client.post("/conversations", json={"database": "not_a_real_db"})
+    assert r.status_code == 400
+    assert "not available" in str(r.json())
+
+
+def test_the_database_is_recorded_and_cannot_change(client):
+    body = client.post("/conversations", json={"database": "ANALYTICS"}).json()
+    assert body["database"] == "ANALYTICS"
+    got = client.get(f"/conversations/{body['conversation_id']}").json()
+    assert got["database"] == "ANALYTICS"

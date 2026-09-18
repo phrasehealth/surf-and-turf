@@ -110,7 +110,8 @@ SCHEMA: dict[str, Any] = {
 
 
 def build_tool(conversation_id: str, cache: ResultCache, author: str | None = None,
-               freshness: Callable[[], dict[str, Any]] | None = None):
+               freshness: Callable[[], dict[str, Any]] | None = None,
+               database: str = ""):
     @tool("record_analysis", DESCRIPTION, SCHEMA)
     async def record_analysis(args: dict[str, Any]) -> dict[str, Any]:
         queries = args.get("queries") or []
@@ -168,7 +169,7 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
                 relations=[_split(r) for r in (args.get("relations") or [])],
                 joins=args.get("joins") or [],
                 run={"origin": "adopted", "bound_params": params,
-                     "database_name": settings.snowflake_database or "unknown",
+                     "database_name": database or "unknown",
                      "role_name": settings.snowflake_role or None,
                      "freshness": freshness() if freshness else None,
                      "resolved_note": args.get("note_template")},

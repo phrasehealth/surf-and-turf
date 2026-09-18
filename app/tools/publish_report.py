@@ -21,7 +21,7 @@ from ..pdf import render_report_pdf
 from ..storage import StoredReport, storage
 
 
-def _cover_meta(author: str | None) -> list[tuple[str, str]]:
+def _cover_meta(author: str | None, database: str = "") -> list[tuple[str, str]]:
     """The cover's metadata block, supplied by the server rather than the model.
 
     Date, requester and source database are facts the process knows; letting the
@@ -31,8 +31,8 @@ def _cover_meta(author: str | None) -> list[tuple[str, str]]:
     meta: list[tuple[str, str]] = [("Generated", datetime.now().strftime("%Y-%m-%d"))]
     if author:
         meta.append(("Prepared for", author))
-    if settings.snowflake_database:
-        meta.append(("Source", settings.snowflake_database.upper()))
+    if database:
+        meta.append(("Source", database.upper()))
     built = _pack_built_at()
     if built:
         meta.append(("Schema as of", built.date().isoformat()))
@@ -76,7 +76,8 @@ def _error(msg: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
 
-def build_tool(conversation_id: str, on_published: OnPublished | None = None, author: str | None = None):
+def build_tool(conversation_id: str, on_published: OnPublished | None = None,
+               author: str | None = None, database: str = ""):
     @tool(
         "publish_report",
         "Render the finished report to PDF and return a download link. Call this once "
@@ -118,7 +119,8 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
                         len(resolved), sections, conversation_id[:8])
         try:
             pdf = await asyncio.to_thread(
-                render_report_pdf, title, body, author, subtitle, _cover_meta(author))
+                render_report_pdf, title, body, author, subtitle,
+                _cover_meta(author, database))
             stored = await storage.save(title, pdf, conversation_id)
         except Exception as e:
             return {"content": [{"type": "text", "text": f"PDF render/upload failed: {e}"}],

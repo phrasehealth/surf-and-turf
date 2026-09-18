@@ -860,12 +860,14 @@ In dependency order, each with its own migration:
    a task drains. Do this with `events`, not after it, or the coupling gets baked in.
 3. `analyses`, `analysis_queries`, `analysis_parameters`, `analysis_relations`,
    `analysis_joins`, `analysis_runs`, `analysis_run_queries` — blocked on the
-   `record_analysis` tool. Revisit the deferred read-back change (§9) once this
-   lands: it is cheap here and awkward later.
+   `record_analysis` tool. Done — the read-back change this once pointed at is
+   optional and stays unbuilt (§9).
 4. `reports`, `report_contents`, `figures` — `publish_report` writes them; figures
    need the chart work.
 5. `sdk_transcript_entries` and the `SessionStore` adapter, plus moving
-   `CLAUDE_CONFIG_DIR` to `/tmp`.
+   `CLAUDE_CONFIG_DIR` to `/tmp`. **Verify with a real restart**, not a unit test:
+   `SessionKey` is a TypedDict, so a store that reads it with `getattr` silently
+   mirrors nothing and resume fails only in production.
 
 ### 8.3 What this changes elsewhere
 
@@ -889,38 +891,31 @@ The execution model, granularity, template fidelity, correction semantics, cart
 `jsonb` with no enforced schema — the agent supplies the column-to-channel mapping,
 and it can be tightened later if `charts.py` wants a stricter contract. What remains:
 
-**Reading back from the cart — outlined, deliberately deferred.**
+**Reading back from the cart — possible now, not planned.**
 
-Today the read-back is recollection: `CLAUDE.md` asks the agent to list each analysis
-with its title, what it shows, its visualization and its filters, and the agent
-composes that from memory. Nothing checks it against what was actually run, so it can
-drift — describing three analyses when two were computed, or naming a bar chart it
-does not then produce.
+The dependency is gone: `record_analysis` is built and `list_analyses()` already
+returns a conversation's cart. This is now a choice rather than a blocked item, and
+the choice is to leave it.
 
-Once the cart is real, the read-back can be a rendering of it instead. The change is
-four small pieces:
+What it would change. Today the read-back is recollection — `CLAUDE.md` asks the
+agent to list each analysis with its title, what it shows, its visualization and its
+filters, and the agent composes that from memory. Nothing checks it against what was
+actually recorded, so it can drift: describing three analyses when two were computed,
+or naming a chart it does not then produce.
 
-1. `CLAUDE.md` instructs the agent to call `record_analysis` **as each analysis
-   completes**, not at publish time, so the cart is populated before the read-back.
-2. A `list_analyses()` tool returns this conversation's cart — label, title,
-   visualization, bound parameters — so the agent reads from state rather than memory.
-   (It is also what feature 2's picker needs, so it is not single-purpose.)
-3. The read-back becomes a rendering of the analyses **proposed for this report** —
-   not of the whole cart. Most conversations record more than they publish: dead ends,
-   a cohort that turned out wrong, a figure the user did not want. So the agent
-   selects from `list_analyses()` and reads back the selection, which is the same
-   ordered list it will later pass to `publish_report`. The requirement that every
-   analysis names its visualization stops being an instruction the agent might skip
-   and becomes a column that is either populated or not.
-4. `publish_report`'s gate tightens: the labels in `analyses` must be ones the agent
-   read back, which closes the gap between what the user approved and what gets
-   published.
+Building it is four small pieces:
 
-**Why not now.** It depends on `record_analysis` (§8.2 step 3) and on the cart being
-persisted, so it cannot be built before either. Writing the `CLAUDE.md` instructions
-now would describe a tool that does not exist, and the prose read-back works in the
-meantime. Revisit when step 3 lands — the cost is small at that point and the drift it
-removes is the kind a reader cannot see.
+1. `CLAUDE.md` instructs the agent to read back from the cart rather than from memory.
+2. A `list_analyses()` tool exposes it (the repository function exists; only the MCP
+   wrapper is missing).
+3. The read-back renders the analyses **proposed for this report** — not the whole
+   cart, since most conversations record more than they publish.
+4. `publish_report`'s gate tightens: the labels published must be ones the user saw.
+
+Why it is not urgent. The drift it removes is real but narrow, and the publish gate
+already prevents the damaging version — a report cannot contain an analysis that was
+never recorded, whatever the read-back said. Worth doing when the read-back is
+observed to be wrong in practice, rather than on principle.
 
 **Concurrency on refresh.** Re-running twenty analyses is twenty Snowflake queries
 with no user waiting. That wants a job queue, not a request handler, and nothing here

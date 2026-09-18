@@ -61,6 +61,9 @@ class Settings:
     snowflake_private_key_path: str = _path("SNOWFLAKE_PRIVATE_KEY_PATH")
     snowflake_role: str = os.getenv("SNOWFLAKE_ROLE", "REPORT_READER")
     snowflake_warehouse: str = os.getenv("SNOWFLAKE_WAREHOUSE", "")
+    # Tooling only (scripts/, the pack extractor). The app never reads this: a
+    # conversation names the database it queries when it starts, and that choice is
+    # enforced on every statement. Eventually it comes from the signed-in session.
     snowflake_database: str = os.getenv("SNOWFLAKE_DATABASE", "")
     snowflake_schema: str = os.getenv("SNOWFLAKE_SCHEMA", "")
     sql_row_limit: int = int(os.getenv("SQL_ROW_LIMIT", "500"))

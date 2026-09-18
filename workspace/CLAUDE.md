@@ -35,6 +35,11 @@ If `qcp/` is missing or a relation is absent from it, fall back to `list_tables`
   connection supply the database. In prose and footnotes, name the database in
   plain words ("Source: penn, `gold.order_events`"). Never copy the literal
   string `{database}` into a report — it means nothing to the reader.
+- **This conversation is bound to one database and cannot change it.** A statement
+  that fully-qualifies its way into a different one is refused, so do not guess a
+  database name or copy one out of the pack's manifest. Two-part
+  `<schema>.<relation>` names always resolve. If the user needs another database,
+  say that it needs a new conversation.
 - Confirm columns with `describe_table` before a final query if anything looks
   stale. The pack states when it was built.
 - **Never invent a column** — see the gate above. If a column you need is in neither

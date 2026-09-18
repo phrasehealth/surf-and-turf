@@ -37,6 +37,9 @@ _FORBIDDEN = re.compile(
     re.IGNORECASE,
 )
 _LIMIT_RE = re.compile(r"\blimit\s+(\d+)\s*$", re.IGNORECASE)
+# db.schema.object — the only way a query can leave its own database.
+_QUALIFIED = re.compile(r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_\"]\w*)")
+_STRINGS = re.compile(r"'(?:[^']|'')*'")
 
 
 class UnsafeSQL(ValueError):
@@ -49,8 +52,32 @@ def _strip_comments(sql: str) -> str:
     return sql.strip()
 
 
-def validate_readonly(sql: str, row_limit: int) -> str:
-    """Return a sanitized, LIMIT-capped statement or raise UnsafeSQL."""
+def cross_database_refs(sql: str, database: str) -> list[str]:
+    """Three-part names addressing a database other than this conversation's.
+
+    A conversation is bound to one database and cannot change it, so a query that
+    fully-qualifies its way into another one is refused. Two-part `schema.object`
+    names are fine: the connection supplies the database.
+
+    String literals are blanked first — `WHERE note = 'a.b.c'` is not a table
+    reference — and the caller has already stripped comments.
+    """
+    target = (database or "").strip().lower()
+    scrubbed = _STRINGS.sub("''", sql)
+    return sorted({
+        f"{db}.{schema}.{obj}"
+        for db, schema, obj in _QUALIFIED.findall(scrubbed)
+        if db.lower() != target
+    })
+
+
+def validate_readonly(sql: str, row_limit: int, database: str = "") -> str:
+    """Return a sanitized, LIMIT-capped statement or raise UnsafeSQL.
+
+    `database` is the conversation's database. When set, the statement may not
+    reference any other one — the restriction is applied per query, not only by the
+    connection, because a fully-qualified name bypasses the connection's default.
+    """
     clean = _strip_comments(sql).rstrip(";").strip()
     if not clean:
         raise UnsafeSQL("Empty statement.")
@@ -60,6 +87,14 @@ def validate_readonly(sql: str, row_limit: int) -> str:
         raise UnsafeSQL("Only SELECT / WITH queries are allowed.")
     if _FORBIDDEN.search(clean):
         raise UnsafeSQL("Statement contains a forbidden keyword (read-only tool).")
+    if database:
+        stray = cross_database_refs(clean, database)
+        if stray:
+            raise UnsafeSQL(
+                f"This conversation is scoped to the {database} database, but the "
+                f"query references {', '.join(stray)}. Drop the database prefix and "
+                f"write <schema>.<relation> — the connection supplies the database. "
+                f"To query another one, start a new conversation against it.")
 
     m = _LIMIT_RE.search(clean)
     if m:
@@ -126,9 +161,13 @@ class MockBackend:
 class SnowflakeBackend:
     """Thin wrapper over snowflake-connector-python; one connection per call.
 
-    Simple and safe for a handful of concurrent report sessions.  Add a pool
-    if you see connection setup dominating query time.
+    Bound to one database for its lifetime: a conversation picks a database when it
+    starts and cannot change it, so the backend is per-conversation rather than a
+    process-wide singleton.
     """
+
+    def __init__(self, database: str = ""):
+        self.database = (database or "").strip()
 
     def _connect(self):
         import snowflake.connector  # imported lazily so mock mode has no dependency
@@ -138,7 +177,7 @@ class SnowflakeBackend:
             user=settings.snowflake_user,
             role=settings.snowflake_role,
             warehouse=settings.snowflake_warehouse,
-            database=settings.snowflake_database or None,
+            database=self.database or None,
             schema=settings.snowflake_schema or None,
             session_parameters={"QUERY_TAG": "report-agent"},
             client_session_keep_alive=False,
@@ -162,6 +201,17 @@ class SnowflakeBackend:
         try:
             cur = conn.cursor()
             cur.execute(f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {settings.sql_timeout_s}")
+            if self.database:
+                # The connector does not fail when the role lacks USAGE — it simply
+                # leaves the session without a current database, and every
+                # unqualified query then fails with a message about USE DATABASE.
+                # Say so here instead, once, with the cause.
+                cur.execute("SELECT current_database()")
+                if not (cur.fetchone() or [None])[0]:
+                    raise RuntimeError(
+                        f"the {settings.snowflake_role or 'configured'} role cannot use "
+                        f"database {self.database!r} (no USAGE grant, or it does not "
+                        f"exist), so the session has no current database")
             cur.execute(sql)
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, (_jsonable(v) for v in row))) for row in cur.fetchall()]
@@ -189,8 +239,8 @@ class SnowflakeBackend:
         return [{"name": r["name"], "type": r["type"]} for r in rows]
 
 
-def get_backend():
-    return SnowflakeBackend() if settings.snowflake_mode == "real" else MockBackend()
+def get_backend(database: str = ""):
+    return SnowflakeBackend(database) if settings.snowflake_mode == "real" else MockBackend()
 
 
 # ---------------------------------------------------------------------------
@@ -206,13 +256,14 @@ def _error(msg: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
 
-def build_tools(cache=None):
-    """The Snowflake toolset for one conversation.
+def build_tools(cache=None, database: str = ""):
+    """The Snowflake toolset for one conversation, scoped to one database.
 
     `cache` retains each result so `record_analysis` can adopt it rather than
-    re-running the query (app/tools/result_cache.py).
+    re-running the query (app/tools/result_cache.py). `database` is fixed for the
+    life of the conversation and is enforced on every statement.
     """
-    backend = get_backend()
+    backend = get_backend(database)
 
     @tool(
         "run_sql",
@@ -224,7 +275,7 @@ def build_tools(cache=None):
     )
     async def run_sql(args: dict[str, Any]) -> dict[str, Any]:
         try:
-            sql = validate_readonly(args["sql"], settings.sql_row_limit)
+            sql = validate_readonly(args["sql"], settings.sql_row_limit, database)
         except UnsafeSQL as e:
             return _error(f"Rejected: {e}")
         raw = str(args.get("sql", ""))     # what the agent sent, before the guard
