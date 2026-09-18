@@ -34,6 +34,13 @@
   .msg .body th, .msg .body td { border: 1px solid var(--line); padding: 4px 8px; }
   .msg .body code { background: var(--tool); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   .msg .body pre { background: var(--tool); padding: 8px; border-radius: 6px; overflow: auto; }
+  /* Agent steps are diagnostics, not conversation: hidden unless asked for.
+     A failed step is not routine, so .tool.error stays visible either way. */
+  body:not(.show-steps) .tool:not(.error) { display: none; }
+  header .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+                   color: var(--muted); cursor: pointer; user-select: none; }
+  header .toggle input { margin: 0; cursor: pointer; }
+  header .toggle .count { font-variant-numeric: tabular-nums; }
   .tool { margin: 6px 0 6px 74px; font-size: 12.5px; color: var(--muted); background: var(--tool);
           border: 1px dashed var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; }
   .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px;
@@ -75,6 +82,9 @@
 <header>
   <h1>Report Agent</h1>
   <div class="status" id="status">connecting…</div>
+  <label class="toggle" title="Show the agent's tool calls (run_sql, Read, Grep…)">
+    <input type="checkbox" id="stepsToggle"> Agent steps <span class="count" id="stepCount"></span>
+  </label>
   <button id="newBtn" title="Start a new conversation">New conversation</button>
 </header>
 <main id="log"></main>
@@ -132,7 +142,21 @@
     const body = el.querySelector('.body'); if (who === 'user') body.textContent = text; else body.innerHTML = md(text || '');
     log.appendChild(el); scroll(); return el;
   }
+  const stepsToggle = document.getElementById('stepsToggle');
+  const stepCount = document.getElementById('stepCount');
+  let steps = 0;
+  function renderStepCount() { stepCount.textContent = steps ? `(${steps})` : ''; }
+  // Off on a first visit; a deliberate choice is remembered after that.
+  try { stepsToggle.checked = localStorage.getItem('showSteps') === '1'; } catch (e) {}
+  document.body.classList.toggle('show-steps', stepsToggle.checked);
+  stepsToggle.addEventListener('change', () => {
+    document.body.classList.toggle('show-steps', stepsToggle.checked);
+    try { localStorage.setItem('showSteps', stepsToggle.checked ? '1' : '0'); } catch (e) {}
+    scroll();
+  });
+
   function addTool(ev) {
+    steps++; renderStepCount();
     const el = document.createElement('div'); el.className = 'tool'; el.dataset.id = ev.id;
     const name = ev.name.replace(/^mcp__[^_]+__/, '');
     el.innerHTML = `<div class="dot"></div><div><span class="name">${esc(name)}</span> <span class="detail">${esc(ev.summary || '')}</span></div>`;
@@ -184,7 +208,7 @@
   }
 
   async function start() {
-    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
+    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null; steps = 0; renderStepCount();
     if (ws) { ws.onclose = null; ws.close(); }
     status.textContent = 'connecting…';
     const r = await fetch('/conversations', { method: 'POST' }); cid = (await r.json()).conversation_id;
