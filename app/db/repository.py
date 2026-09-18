@@ -175,3 +175,152 @@ async def list_reports(conversation_id: str) -> list[dict[str, Any]]:
             " ORDER BY published_at"
         ), {"cid": conversation_id})).mappings().all()
     return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------- analyses
+
+async def record_analysis(*, conversation_id: str, title: str, subtitle: str | None,
+                          note_template: str | None, chart_type: str | None,
+                          chart_spec: dict[str, Any] | None, created_by: str | None,
+                          queries: list[dict[str, Any]], parameters: list[dict[str, Any]],
+                          relations: list[tuple[str, str]], joins: list[dict[str, Any]],
+                          run: dict[str, Any], supersedes_serial: int | None = None,
+                          ) -> dict[str, Any]:
+    """Write a specification and the run that produced it, in one transaction.
+
+    Correcting an analysis makes a new version of the same lineage rather than
+    editing the old one: a published report points at a run, and that run's
+    specification has to stay exactly as it was (docs §7).
+    """
+    async with db.begin() as conn:
+        lineage_id, version, supersedes_id = None, 1, None
+        if supersedes_serial is not None:
+            prior = (await conn.execute(text(
+                "SELECT id, lineage_id, version FROM analyses WHERE serial = :s"
+            ), {"s": supersedes_serial})).mappings().first()
+            if prior is None:
+                raise ValueError(f"no analysis with serial {supersedes_serial}")
+            lineage_id, supersedes_id = prior["lineage_id"], prior["id"]
+            version = (await conn.execute(text(
+                "SELECT max(version) + 1 FROM analyses WHERE lineage_id = :l"
+            ), {"l": lineage_id})).scalar_one()
+
+        analysis = (await conn.execute(text(
+            "INSERT INTO analyses (lineage_id, version, supersedes_id,"
+            "                      origin_conversation_id, title, subtitle,"
+            "                      note_template, chart_type, chart_spec, created_by)"
+            " VALUES (coalesce(cast(:lineage AS uuid), gen_random_uuid()), :version,"
+            "         cast(:supersedes AS uuid), :cid, :title, :subtitle, :note,"
+            "         :chart_type, cast(:chart_spec AS jsonb), :by)"
+            " RETURNING id, serial, version"
+        ), {"lineage": str(lineage_id) if lineage_id else None, "version": version,
+            "supersedes": str(supersedes_id) if supersedes_id else None,
+            "cid": conversation_id, "title": title, "subtitle": subtitle,
+            "note": note_template, "chart_type": chart_type,
+            "chart_spec": _json(chart_spec) if chart_spec else None,
+            "by": created_by})).mappings().one()
+        aid = analysis["id"]
+
+        query_ids = []
+        for i, q in enumerate(queries, start=1):
+            qid = (await conn.execute(text(
+                "INSERT INTO analysis_queries (analysis_id, seq, purpose, is_primary,"
+                "                              sql_template)"
+                " VALUES (:aid, :seq, :purpose, :primary, :sql) RETURNING id"
+            ), {"aid": aid, "seq": i, "purpose": q.get("purpose"),
+                "primary": bool(q.get("primary")), "sql": q["sql_template"]})).scalar_one()
+            query_ids.append(qid)
+
+        if parameters:
+            await conn.execute(text(
+                "INSERT INTO analysis_parameters (analysis_id, name, kind, operator,"
+                "                                 value, expression, label)"
+                " VALUES (:aid, :name, :kind, :operator, cast(:value AS jsonb),"
+                "         :expression, :label)"
+            ), [{"aid": aid, "name": p["name"], "kind": p.get("kind", "other"),
+                 "operator": p.get("operator", "in"), "value": _json(p.get("value")),
+                 "expression": p.get("expression"), "label": p.get("label")}
+                for p in parameters])
+        if relations:
+            await conn.execute(text(
+                "INSERT INTO analysis_relations (analysis_id, schema_name, relation_name)"
+                " VALUES (:aid, :schema, :relation) ON CONFLICT DO NOTHING"
+            ), [{"aid": aid, "schema": s, "relation": r} for s, r in relations])
+        if joins:
+            await conn.execute(text(
+                "INSERT INTO analysis_joins (analysis_id, left_ref, right_ref, verified,"
+                "                            match_pct)"
+                " VALUES (:aid, :left, :right, :verified, :pct) ON CONFLICT DO NOTHING"
+            ), [{"aid": aid, "left": j["left"], "right": j["right"],
+                 "verified": bool(j.get("verified")), "pct": j.get("match_pct")}
+                for j in joins])
+
+        run_id = (await conn.execute(text(
+            "INSERT INTO analysis_runs (analysis_id, ran_by, origin, bound_params,"
+            "                           database_name, role_name, error, freshness,"
+            "                           resolved_note)"
+            " VALUES (:aid, :by, :origin, cast(:params AS jsonb), :db, :role, :error,"
+            "         cast(:freshness AS jsonb), :note) RETURNING id"
+        ), {"aid": aid, "by": created_by, "origin": run.get("origin", "adopted"),
+            "params": _json(run.get("bound_params") or {}), "db": run["database_name"],
+            "role": run.get("role_name"), "error": run.get("error"),
+            "freshness": _json(run["freshness"]) if run.get("freshness") else None,
+            "note": run.get("resolved_note")})).scalar_one()
+
+        for qid, q in zip(query_ids, queries):
+            await conn.execute(text(
+                "INSERT INTO analysis_run_queries (run_id, analysis_query_id, tool_use_id,"
+                "        resolved_sql, template_verified, duration_ms, row_count, error,"
+                "        result_digest)"
+                " VALUES (:run, :q, :tool, :sql, :verified, :ms, :rows, :error, :digest)"
+            ), {"run": run_id, "q": qid, "tool": q.get("tool_use_id"),
+                "sql": q.get("resolved_sql") or q["sql_template"],
+                "verified": q.get("template_verified"), "ms": q.get("duration_ms"),
+                "rows": q.get("row_count"), "error": q.get("error"),
+                "digest": q.get("result_digest")})
+
+    return {"id": aid, "serial": analysis["serial"], "version": analysis["version"],
+            "run_id": run_id,
+            "label": f"A-{analysis['serial']}.{analysis['version']}"}
+
+
+async def list_analyses(conversation_id: str) -> list[dict[str, Any]]:
+    """The cart: what this conversation has recorded, newest last."""
+    async with db.begin() as conn:
+        rows = (await conn.execute(text(
+            "SELECT a.id, a.serial, a.version, a.title, a.subtitle, a.chart_type,"
+            "       'A-' || a.serial || '.' || a.version AS label, a.created_at,"
+            "       (SELECT id FROM analysis_runs r WHERE r.analysis_id = a.id"
+            "         ORDER BY ran_at DESC LIMIT 1) AS latest_run_id"
+            "  FROM analyses a"
+            " WHERE a.origin_conversation_id = :cid AND a.archived_at IS NULL"
+            "   AND NOT EXISTS (SELECT 1 FROM analyses newer"
+            "                    WHERE newer.lineage_id = a.lineage_id"
+            "                      AND newer.version > a.version)"
+            " ORDER BY a.created_at"
+        ), {"cid": conversation_id})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def resolve_analysis_labels(conversation_id: str, labels: list[str],
+                                  ) -> tuple[list[dict[str, Any]], list[str]]:
+    """(resolved, unknown) for labels like 'A-1042.1', scoped to this conversation."""
+    known = {a["label"]: a for a in await list_analyses(conversation_id)}
+    resolved, unknown = [], []
+    for label in labels:
+        hit = known.get(label.strip())
+        (resolved if hit else unknown).append(hit or label)
+    return resolved, unknown
+
+
+async def link_report_contents(report_id: Any, analyses: list[dict[str, Any]]) -> None:
+    """A report snapshots RUNS, so a later refresh cannot retouch it."""
+    rows = [{"r": report_id, "run": a["latest_run_id"], "pos": i}
+            for i, a in enumerate(analyses, start=1) if a.get("latest_run_id")]
+    if not rows:
+        return
+    async with db.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO report_contents (report_id, analysis_run_id, position)"
+            " VALUES (:r, :run, :pos)"
+        ), rows)

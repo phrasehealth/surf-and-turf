@@ -27,9 +27,11 @@ from typing import Any, AsyncIterator
 
 from .config import settings
 from .db import session_store
+from .tools.result_cache import ResultCache
 from .storage import StoredReport
 from .workspace_guard import build_hook
 from .tools import publish_report as publish_tool
+from .tools import record_analysis as record_tool
 from .tools import snowflake_sql
 
 log = logging.getLogger("report-agent.agent")
@@ -48,9 +50,10 @@ current they are. `qcp/README.md` states the lookup protocol; follow it rather t
 guessing table or column names. `qcp/index.md` is loaded for you already.
 
 Workflow: clarify the ask if needed -> find the relation in the pack -> query
-(aggregate in SQL) -> summarize findings in the chat -> read back what the user asked
-for and wait for confirmation -> call `publish_report` with the complete report as
-Markdown. After publishing, tell the user the report is ready; the download link is
+(aggregate in SQL) -> call `record_analysis` for each finished analysis, adopting the
+run_sql calls you already made -> summarize findings in the chat -> read back what the
+user asked for and wait for confirmation -> call `publish_report` with the complete
+report as Markdown and the labels `record_analysis` returned. After publishing, tell the user the report is ready; the download link is
 shown to them automatically.
 
 A report holds one or more analyses and accumulates like a shopping cart: a further
@@ -68,6 +71,8 @@ def _summarize_input(name: str, inp: dict[str, Any]) -> str:
         return " ".join(str(inp.get("sql", "")).split())[:300]
     if name.endswith("publish_report"):
         return f"title={inp.get('title')!r}, {len(str(inp.get('body_markdown', '')))} chars"
+    if name.endswith("record_analysis"):
+        return f"title={inp.get('title')!r}, {len(inp.get('queries') or [])} quer(y/ies)"
     if name in {"Read", "Glob", "Grep"}:
         return str(inp.get("file_path") or inp.get("pattern") or "")[:200]
     return json.dumps(inp, default=str)[:300]
@@ -99,6 +104,8 @@ class AgentSession:
         self.last_used = time.time()
         self.reports: list[dict[str, Any]] = []
         self._lock = asyncio.Lock()
+        # Recent run_sql results, so record_analysis can adopt one (docs §7).
+        self.results = ResultCache()
         self._client = None
         self._pending_reports: asyncio.Queue[Event] = asyncio.Queue()
 
@@ -114,8 +121,9 @@ class AgentSession:
     def _build_options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, create_sdk_mcp_server
 
-        tools = snowflake_sql.build_tools() + [
-            publish_tool.build_tool(self.id, self._on_published, author=self.user_id)
+        tools = snowflake_sql.build_tools(self.results) + [
+            record_tool.build_tool(self.id, self.results, author=self.user_id),
+            publish_tool.build_tool(self.id, self._on_published, author=self.user_id),
         ]
         server = create_sdk_mcp_server(MCP_SERVER_NAME, version="1.0.0", tools=tools)
         mcp_tool_names = [f"mcp__{MCP_SERVER_NAME}__{t.name}" for t in tools]
@@ -199,6 +207,10 @@ class AgentSession:
                         yield {"type": "assistant_text", "text": text, "message_id": msg.message_id}
                     for b in msg.content:
                         if isinstance(b, ToolUseBlock):
+                            # The handler never learns its own id, so the mapping
+                            # from tool call to SQL is made here.
+                            if b.name.endswith("run_sql"):
+                                self.results.bind(b.id, str(b.input.get("sql", "")))
                             yield {"type": "tool_use", "id": b.id, "name": b.name,
                                    "summary": _summarize_input(b.name, b.input)}
                 elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
@@ -224,7 +236,9 @@ class AgentSession:
 class MockAgentSession(AgentSession):
     async def start(self) -> None:
         self._client = object()  # sentinel: "started"
-        self._sql_tools = {t.name: t for t in snowflake_sql.build_tools()}
+        # The same cache the real session uses, so the mock exercises the adopt path.
+        self._sql_tools = {t.name: t for t in snowflake_sql.build_tools(self.results)}
+        self._record = record_tool.build_tool(self.id, self.results, author=self.user_id)
         self._publish = publish_tool.build_tool(self.id, self._on_published, author=self.user_id)
 
     async def close(self) -> None:
@@ -253,6 +267,7 @@ class MockAgentSession(AgentSession):
             tid = "toolu_" + uuid.uuid4().hex[:8]
             sql = ("SELECT day, alert_name, firings, accept_rate "
                    "FROM ANALYTICS.CDS.ALERT_DAILY ORDER BY day")
+            self.results.bind(tid, sql)     # the real session does this off the stream
             yield {"type": "tool_use", "id": tid, "name": f"mcp__{MCP_SERVER_NAME}__run_sql",
                    "summary": sql}
             res = await self._sql_tools["run_sql"].handler({"sql": sql})
@@ -274,13 +289,37 @@ class MockAgentSession(AgentSession):
                 yield ev
 
             if wants_pdf:
+                # Record before publishing, exactly as the real agent must: the
+                # publish gate refuses a body whose analyses were never recorded.
+                rid = "toolu_" + uuid.uuid4().hex[:8]
+                spec = {
+                    "title": "Sepsis Screen daily acceptance",
+                    "subtitle": "Firings and acceptance by day",
+                    "note_template": "Data included days between "
+                                     f"{rows[0]['DAY']} and {rows[-1]['DAY']}. "
+                                     "Source: ANALYTICS.CDS.ALERT_DAILY (mock data).",
+                    "queries": [{"tool_use_id": tid, "sql_template": sql, "primary": True}],
+                    "parameters": [], "relations": ["CDS.ALERT_DAILY"], "joins": [],
+                    "chart_type": "vbar",
+                    "chart_spec": {"x": "DAY", "value": "FIRINGS"},
+                }
+                yield {"type": "tool_use", "id": rid,
+                       "name": f"mcp__{MCP_SERVER_NAME}__record_analysis",
+                       "summary": _summarize_input("record_analysis", spec)}
+                res = await self._record.handler(spec)
+                yield {"type": "tool_result", "tool_use_id": rid,
+                       "is_error": bool(res.get("is_error")), "preview": _preview(res["content"])}
+                label = json.loads(res["content"][0]["text"])["label"]
+
                 pid = "toolu_" + uuid.uuid4().hex[:8]
                 body = ("## Summary\n\nAlert acceptance improved steadily across the week.\n\n"
                         "## Daily detail\n\n" + table + "\n\n## Method\n\nSource: "
                         "`ANALYTICS.CDS.ALERT_DAILY` (mock data).")
                 yield {"type": "tool_use", "id": pid, "name": f"mcp__{MCP_SERVER_NAME}__publish_report",
                        "summary": _summarize_input("publish_report", {"title": "Sepsis Screen Weekly", "body_markdown": body})}
-                res = await self._publish.handler({"title": "Sepsis Screen Weekly", "body_markdown": body})
+                res = await self._publish.handler(
+                    {"title": "Sepsis Screen Weekly", "subtitle": "Mock weekly review",
+                     "body_markdown": body, "analyses": [label]})
                 yield {"type": "tool_result", "tool_use_id": pid,
                        "is_error": bool(res.get("is_error")), "preview": _preview(res["content"])}
                 while not self._pending_reports.empty():

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -205,7 +206,12 @@ def _error(msg: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
 
-def build_tools():
+def build_tools(cache=None):
+    """The Snowflake toolset for one conversation.
+
+    `cache` retains each result so `record_analysis` can adopt it rather than
+    re-running the query (app/tools/result_cache.py).
+    """
     backend = get_backend()
 
     @tool(
@@ -219,10 +225,20 @@ def build_tools():
             sql = validate_readonly(args["sql"], settings.sql_row_limit)
         except UnsafeSQL as e:
             return _error(f"Rejected: {e}")
+        raw = str(args.get("sql", ""))     # what the agent sent, before the guard
+        started = time.monotonic()
         try:
             rows = await backend.run(sql)
         except Exception as e:  # surface Snowflake errors to the model, not the user
+            if cache is not None:
+                cache.put(raw, [], int((time.monotonic() - started) * 1000),
+                          error=str(e), aliases=[sql])
             return _error(f"Snowflake error: {e}")
+        if cache is not None:
+            # Kept so an analysis can adopt this result instead of re-running it.
+            # Stored under both spellings: the agent quotes what it sent, the guard
+            # executed something slightly different.
+            cache.put(raw, rows, int((time.monotonic() - started) * 1000), aliases=[sql])
         return _text({"row_count": len(rows), "rows": rows})
 
     @tool(

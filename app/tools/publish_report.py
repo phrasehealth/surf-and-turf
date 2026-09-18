@@ -57,6 +57,24 @@ def _pack_built_at() -> datetime | None:
 
 OnPublished = Callable[[StoredReport, str], Awaitable[None]]
 
+log = logging.getLogger("report-agent.tools")
+
+_RECORD_FIRST = (
+    "Rejected: `analyses` is empty, but the body has {sections} section(s). Every "
+    "analysis in a report must be recorded before it can be published.\n\n"
+    "For each one, call:\n"
+    "  record_analysis(title, subtitle, note_template,\n"
+    "                  queries=[{{tool_use_id, sql_template, purpose, primary}}],\n"
+    "                  parameters, relations, joins, chart_type, chart_spec)\n\n"
+    "Pass the tool_use_id of the run_sql calls you already made, so nothing is "
+    "re-run. Each call returns a label like 'A-1042.1'. Then call publish_report "
+    "again with those labels in `analyses`, in the order they appear in the body."
+)
+
+
+def _error(msg: str) -> dict[str, Any]:
+    return {"content": [{"type": "text", "text": msg}], "is_error": True}
+
 
 def build_tool(conversation_id: str, on_published: OnPublished | None = None, author: str | None = None):
     @tool(
@@ -65,9 +83,11 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
         "the analysis is complete and the user has confirmed the read-back. `title` and "
         "`subtitle` go on the generated cover page — do not repeat either in the body. "
         "`body_markdown` is the report itself: one section per analysis, then the "
-        "appendix of queries. The cover's date, requester and source database are added "
-        "by the server; do not write them yourself.",
-        {"title": str, "body_markdown": str, "subtitle": str},
+        "appendix of queries. `analyses` is the ordered list of labels from "
+        "`record_analysis` — every analysis in the body must have been recorded first. "
+        "The cover's date, requester and source database are added by the server; do "
+        "not write them yourself.",
+        {"title": str, "body_markdown": str, "subtitle": str, "analyses": list},
     )
     async def publish_report(args: dict[str, Any]) -> dict[str, Any]:
         title = (args.get("title") or "Report").strip()
@@ -76,6 +96,26 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
         if len(body.strip()) < 20:
             return {"content": [{"type": "text", "text": "Rejected: body_markdown is empty."}],
                     "is_error": True}
+
+        # Every analysis in a report must be recorded first, so the numbers can be
+        # traced, refreshed and reused (docs/persistence-schema.md §7). The refusal
+        # is written to be acted on, not merely to be correct.
+        labels = [str(x) for x in (args.get("analyses") or [])]
+        resolved, unknown = await repository.resolve_analysis_labels(conversation_id, labels)
+        sections = body.count("\n## ") + (1 if body.startswith("## ") else 0)
+        if not labels:
+            return _error(_RECORD_FIRST.format(sections=sections or "several"))
+        if unknown:
+            return _error(
+                f"Rejected: {', '.join(unknown)} " +
+                ("is not an analysis" if len(unknown) == 1 else "are not analyses") +
+                " recorded in this conversation. Use the labels `record_analysis` "
+                "returned, exactly as given.")
+        if sections and len(resolved) != sections:
+            # A heuristic: a report may legitimately carry a section that is not an
+            # analysis, so this warns rather than refusing.
+            log.warning("publish: %d analyses for %d body sections in %s",
+                        len(resolved), sections, conversation_id[:8])
         try:
             pdf = await asyncio.to_thread(
                 render_report_pdf, title, body, author, subtitle, _cover_meta(author))
@@ -84,12 +124,13 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None, au
             return {"content": [{"type": "text", "text": f"PDF render/upload failed: {e}"}],
                     "is_error": True}
         try:
-            await repository.record_report(
+            rec = await repository.record_report(
                 conversation_id, title=title, subtitle=subtitle,
                 storage_backend=settings.report_storage, storage_key=stored.filename,
                 report_uid=stored.report_id, size_bytes=stored.size_bytes,
                 published_by=author, handling_marking=settings.report_marking or None,
                 qcp_built_at=_pack_built_at(), body_markdown=body)
+            await repository.link_report_contents(rec["id"], resolved)
         except Exception:
             # The PDF exists and the user should get it; a bookkeeping failure is
             # logged, not raised back at the model as a publish failure.

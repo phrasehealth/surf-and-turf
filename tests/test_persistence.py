@@ -16,12 +16,6 @@ from app.db.session_store import PostgresSessionStore
 from app.db.writer import EventWriter
 
 
-@pytest.fixture
-def run(db_loop):
-    """Run a coroutine on the test's loop — see the `db_loop` fixture for why."""
-    return db_loop.run_until_complete
-
-
 def test_conversation_round_trips(db_conn, run):
     cid = str(uuid.uuid4())
     run(repo.create_conversation(cid, "david.do@phrasehealth.com"))

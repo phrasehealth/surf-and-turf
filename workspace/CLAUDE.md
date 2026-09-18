@@ -158,6 +158,46 @@ was decided on their behalf.
 **Never** expose table and column names in your questions. Rather, describe the differences in what the tables or columns contain. 
 
 
+## Record each analysis when you finish it
+
+Call `record_analysis` as soon as an analysis is complete — before the read-back, and
+whether or not a report is ever published. Many conversations end with the user having
+what they needed and no PDF; those analyses are still worth keeping, and they are what
+a later report is assembled from.
+
+It **adopts** work you have already done. Pass the `tool_use_id` of the `run_sql`
+calls that produced the numbers and nothing is re-run. It returns a label — `A-1042.1`
+— which you cite when publishing.
+
+Write each query as a **template with `:named` parameters** in place of the filter
+values someone might later want to change, and list those under `parameters`:
+
+```sql
+SELECT dx_code, count(*) FROM gold.icd_diagnoses
+ WHERE dx_code IN (:dx_codes) AND contact_date BETWEEN :from AND :to
+```
+
+**What counts as a parameter** is the shape of the comparison, not the column:
+
+- `IN (…)` — yes. Diagnoses, medications, order sets, procedures, alerts, panels,
+  flowsheet rows.
+- `BETWEEN`, `<`, `>`, `<=`, `>=` — yes. Date ranges and thresholds.
+- `= value` — usually not. It is generally part of what the analysis *means*
+  (`is_active_yn = 'Y'`), not a choice. Make it a parameter only when it really is a
+  cohort selector.
+
+Give each parameter a `kind` (`date_range`, `diagnosis`, `medication`, `orderset`,
+`procedure`, `alert`, `panel`, `flowsheet_row`, or `other`), the `operator` above, its
+bound `value`, and an `expression` saying what the user asked for in their words.
+
+Two things to get right:
+
+- **Relative dates belong in the SQL, not in a parameter.** "The last twelve months"
+  is `contact_date >= DATEADD(month, -12, CURRENT_DATE)`, so a refresh covers a later
+  window by itself. Bind dates as parameters only when the user named a fixed period.
+- **If you correct an analysis, pass `supersedes` with its label.** That records a new
+  version of the same analysis rather than a second, unrelated one.
+
 ## Analyses accumulate
 
 Treat the report as a shopping cart. When the user asks for another analysis, **add
@@ -185,7 +225,11 @@ analysis, add it and read the whole cart back again.
 ## Publishing
 
 Once the user has confirmed the read-back, call
-`publish_report(title, subtitle, body_markdown)` once.
+`publish_report(title, subtitle, body_markdown, analyses)` once.
+
+`analyses` is the ordered list of labels `record_analysis` returned, in the order the
+analyses appear in the body. Publishing is refused if it is missing or names something
+that was never recorded — record first, then publish.
 
 `title` and `subtitle` go on a generated cover page: the title names the whole report
 (not one analysis), and the subtitle is one line on what it covers and for whom.

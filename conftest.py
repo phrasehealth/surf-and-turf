@@ -126,3 +126,9 @@ def db_conn(migrated_database, db_loop):
         yield _db
     finally:
         db_loop.run_until_complete(_teardown())
+
+
+@pytest.fixture
+def run(db_loop):
+    """Run a coroutine on the test's event loop — see `db_loop` for why it matters."""
+    return db_loop.run_until_complete

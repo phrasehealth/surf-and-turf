@@ -884,10 +884,10 @@ of it is needed to build and prove the schema locally.
 ## 9. Still open
 
 The execution model, granularity, template fidelity, correction semantics, cart
-membership, the publish gate, what counts as a parameter (§3.1) and figure naming
-(§3.2) are all decided. `chart_spec` stays `jsonb` with no enforced schema — the
-agent supplies the column-to-channel mapping, and it can be tightened later if
-`charts.py` turns out to want a stricter contract. What remains:
+`record_analysis`, its result cache and the publish gate are **built**
+(`app/tools/record_analysis.py`, `app/tools/result_cache.py`). `chart_spec` stays
+`jsonb` with no enforced schema — the agent supplies the column-to-channel mapping,
+and it can be tightened later if `charts.py` wants a stricter contract. What remains:
 
 **Reading back from the cart — outlined, deliberately deferred.**
 
@@ -921,12 +921,6 @@ persisted, so it cannot be built before either. Writing the `CLAUDE.md` instruct
 now would describe a tool that does not exist, and the prose read-back works in the
 meantime. Revisit when step 3 lands — the cost is small at that point and the drift it
 removes is the kind a reader cannot see.
-
-**The adopted-result cache.** "Adopt" means binding to results `run_sql` already
-produced, and the server does not keep them: `run_sql` returns rows to the model and
-discards them. A per-conversation cache keyed by `tool_use_id` is a hard prerequisite
-— bounded naturally, since each result is capped at `SQL_ROW_LIMIT` rows, but it needs
-a TTL and an eviction rule. Nothing else in `record_analysis` can be built first.
 
 **Concurrency on refresh.** Re-running twenty analyses is twenty Snowflake queries
 with no user waiting. That wants a job queue, not a request handler, and nothing here
