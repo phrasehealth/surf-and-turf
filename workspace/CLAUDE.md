@@ -146,7 +146,7 @@ Ask by naming the options and what separates them, not with a bare "which would 
 like?":
 
 > Eleven order sets match "stroke". The busiest is STROKE / TIA ADMISSION ORDER SET
-> IP NEURO (5,147 activations); the next is UPHS ED STROKE ORDER SET (2,910). Do you
+> IP NEURO (5,147 activations); the next is ED STROKE ORDER SET (2,910). Do you
 > want the top one, the top few separately, or all eleven combined?
 
 Do not ask about choices that cannot move the number — column order, table sorting,
