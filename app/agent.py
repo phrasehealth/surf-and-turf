@@ -27,6 +27,7 @@ from typing import Any, AsyncIterator
 
 from .config import settings
 from .storage import StoredReport
+from .workspace_guard import build_hook
 from .tools import publish_report as publish_tool
 from .tools import snowflake_sql
 
@@ -102,7 +103,7 @@ class AgentSession:
         await self._pending_reports.put(ev)
 
     def _build_options(self):
-        from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server
+        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, create_sdk_mcp_server
 
         tools = snowflake_sql.build_tools() + [
             publish_tool.build_tool(self.id, self._on_published, author=self.user_id)
@@ -110,6 +111,7 @@ class AgentSession:
         server = create_sdk_mcp_server(MCP_SERVER_NAME, version="1.0.0", tools=tools)
         mcp_tool_names = [f"mcp__{MCP_SERVER_NAME}__{t.name}" for t in tools]
         builtin = ["Read", "Glob", "Grep"]
+        guard_tools = builtin + ["NotebookRead"]  # guard tools we do not enable, too
 
         env: dict[str, str] = {}
         if settings.use_bedrock:
@@ -124,6 +126,13 @@ class AgentSession:
             allowed_tools=builtin + mcp_tool_names,
             mcp_servers={MCP_SERVER_NAME: server},
             permission_mode="dontAsk",  # anything not pre-approved is denied, never prompted
+            # `allowed_tools` gates tool names, not paths, and it also shadows
+            # `can_use_tool`. A PreToolUse hook is the only layer that sees every
+            # file call, so the workspace boundary is enforced there.
+            hooks={"PreToolUse": [HookMatcher(
+                matcher="|".join(guard_tools),
+                hooks=[build_hook(settings.workspace_dir, self.id)],
+            )]},
             model=settings.model,
             max_turns=settings.max_turns,
             max_budget_usd=settings.max_budget_usd,

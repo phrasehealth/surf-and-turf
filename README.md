@@ -187,8 +187,12 @@ scheduled job rather than every start.
 
 ## Security posture
 
-- Model has no Bash, Write, Edit, or network tools. It can only read `workspace/` and call
-  the four custom tools.
+- Model has no Bash, Write, Edit, or network tools. It can call the four custom tools,
+  and its file tools are confined to `workspace/` by a `PreToolUse` hook
+  (`app/workspace_guard.py`) — `allowed_tools` gates tool *names*, not paths, and `cwd`
+  only decides where relative paths resolve, so neither is a boundary on its own. This
+  matters because `run_sql` puts free-text clinician content into the model's context,
+  and the container holds the Snowflake key and AWS credentials.
 - SQL is validated read-only and row-capped in code; the Snowflake role must also be read-only.
 - Container runs as a non-root user; secrets never go in the image.
 - The pack ships in the image and contains schema metadata, not data — except
