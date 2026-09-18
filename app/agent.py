@@ -267,11 +267,11 @@ class MockAgentSession(AgentSession):
             tid = "toolu_" + uuid.uuid4().hex[:8]
             sql = ("SELECT day, alert_name, firings, accept_rate "
                    "FROM ANALYTICS.CDS.ALERT_DAILY ORDER BY day")
-            self.results.bind(tid, sql)     # the real session does this off the stream
             yield {"type": "tool_use", "id": tid, "name": f"mcp__{MCP_SERVER_NAME}__run_sql",
                    "summary": sql}
             res = await self._sql_tools["run_sql"].handler({"sql": sql})
-            rows = json.loads(res["content"][0]["text"])["rows"]
+            payload = json.loads(res["content"][0]["text"])
+            rows, result_ref = payload["rows"], payload.get("result_ref")
             yield {"type": "tool_result", "tool_use_id": tid, "is_error": False,
                    "preview": _preview(res["content"])}
 
@@ -298,7 +298,8 @@ class MockAgentSession(AgentSession):
                     "note_template": "Data included days between "
                                      f"{rows[0]['DAY']} and {rows[-1]['DAY']}. "
                                      "Source: ANALYTICS.CDS.ALERT_DAILY (mock data).",
-                    "queries": [{"tool_use_id": tid, "sql_template": sql, "primary": True}],
+                    "queries": [{"result_ref": result_ref, "sql_template": sql,
+                                 "primary": True}],
                     "parameters": [], "relations": ["CDS.ALERT_DAILY"], "joins": [],
                     "chart_type": "vbar",
                     "chart_spec": {"x": "DAY", "value": "FIRINGS"},

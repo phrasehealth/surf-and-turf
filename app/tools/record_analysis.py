@@ -4,9 +4,10 @@ Recording is independent of publishing (docs/persistence-schema.md §7). Many
 conversations end with the user satisfied and no PDF; those analyses are still worth
 keeping, and they are what a later report is assembled from.
 
-The tool **adopts** rather than executes: each query names the `tool_use_id` of a
-`run_sql` the agent already made, and the server binds the specification to results it
-already holds. Nothing is re-run, and the numbers in the report are the numbers that
+The tool **adopts** rather than executes: each query names the `result_ref` that a
+`run_sql` handed back, and the server binds the specification to results it already
+holds. A reference rather than the tool_use_id because a model never sees the id of
+its own call — it can only quote what came back in a result. Nothing is re-run, and the numbers in the report are the numbers that
 were computed.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from claude_agent_sdk import tool
 
 from ..config import settings
 from ..db import repository
-from .result_cache import ResultCache, matches
+from .result_cache import ResultCache, bind_template, matches
 
 log = logging.getLogger("report-agent.tools")
 
@@ -27,7 +28,7 @@ DESCRIPTION = (
     "Record one analysis — a title, the queries behind it, its filters and its chart — "
     "so it can be published, refreshed later against new data, or reused in another "
     "report. Call this as each analysis is finished, before reading back to the user; "
-    "recording does not publish anything. Pass the `tool_use_id` of the `run_sql` calls "
+    "recording does not publish anything. Pass the `result_ref` each `run_sql` "
     "you already made so nothing is re-run. Returns a label like 'A-1042.1' to cite in "
     "`publish_report`."
 )
@@ -45,8 +46,9 @@ SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "tool_use_id": {"type": "string",
-                                    "description": "id of the run_sql call that produced this."},
+                    "result_ref": {"type": "string",
+                                   "description": "The `result_ref` that run_sql returned "
+                                                  "for this query, e.g. 'q1'."},
                     "sql_template": {"type": "string",
                                      "description": "The SQL with :named parameters in place of "
                                                     "swappable filter values."},
@@ -54,7 +56,7 @@ SCHEMA: dict[str, Any] = {
                     "primary": {"type": "boolean",
                                 "description": "True for the query the table and chart come from."},
                 },
-                "required": ["sql_template"],
+                "required": ["result_ref", "sql_template"],
             },
         },
         "parameters": {
@@ -114,7 +116,7 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
         queries = args.get("queries") or []
         if not queries:
             return _error("Rejected: `queries` is empty. An analysis needs at least one "
-                          "query — pass the tool_use_id and sql_template of the run_sql "
+                          "query — pass the result_ref and sql_template of the run_sql "
                           "call that produced its numbers.")
         if sum(1 for q in queries if q.get("primary")) > 1:
             return _error("Rejected: more than one query is marked `primary`. Exactly one "
@@ -125,10 +127,13 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
         params = {p["name"]: p.get("value") for p in (args.get("parameters") or [])}
         adopted, missing = [], []
         for q in queries:
-            entry = (cache.get(q["tool_use_id"]) if q.get("tool_use_id") else None) \
-                or cache.get_by_sql(q["sql_template"])
+            # By the reference run_sql handed back; then by the SQL itself, bound or
+            # raw, so a query written without parameters still resolves.
+            entry = (cache.get_by_ref(q.get("result_ref", ""))
+                     or cache.get_by_sql(bind_template(q["sql_template"], params))
+                     or cache.get_by_sql(q["sql_template"]))
             if entry is None:
-                missing.append(q.get("tool_use_id") or "(no tool_use_id given)")
+                missing.append(q.get("result_ref") or "(no result_ref given)")
                 continue
             adopted.append({
                 **q,
@@ -140,11 +145,17 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
                 "template_verified": matches(q["sql_template"], params, entry.sql),
             })
         if missing:
+            # Say what *is* adoptable: guessing at an identifier is the failure mode
+            # this replaced, and an error that only says "no" invites more guessing.
+            available = cache.recent()
+            listing = ("\n".join(f"  {e.ref}  {' '.join(e.sql.split())[:90]}"
+                                  for e in available)
+                       if available else "  (nothing — run the query first)")
             return _error(
-                f"Rejected: no cached result for {', '.join(missing)}. `record_analysis` "
-                "adopts a query you already ran — pass the `tool_use_id` of the `run_sql` "
-                "call, exactly as it appeared. If the result has aged out, run the query "
-                "again and record it straight away.")
+                f"Rejected: no result for {', '.join(missing)}.\n\n"
+                "`record_analysis` adopts a query you already ran. Every `run_sql` reply "
+                "includes a `result_ref` like 'q1' — pass that.\n\n"
+                f"Available now:\n{listing}")
 
         supersedes_serial = _serial_of(args.get("supersedes"))
         try:

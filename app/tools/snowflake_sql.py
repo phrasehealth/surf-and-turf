@@ -217,7 +217,9 @@ def build_tools(cache=None):
     @tool(
         "run_sql",
         "Run a read-only SELECT against Snowflake. Returns JSON rows (capped at "
-        f"{settings.sql_row_limit}); aggregate in SQL rather than pulling raw rows.",
+        f"{settings.sql_row_limit}); aggregate in SQL rather than pulling raw rows. "
+        "The reply also carries a `result_ref` — quote it to `record_analysis` so the "
+        "query is not run twice.",
         {"sql": str},
     )
     async def run_sql(args: dict[str, Any]) -> dict[str, Any]:
@@ -238,7 +240,11 @@ def build_tools(cache=None):
             # Kept so an analysis can adopt this result instead of re-running it.
             # Stored under both spellings: the agent quotes what it sent, the guard
             # executed something slightly different.
-            cache.put(raw, rows, int((time.monotonic() - started) * 1000), aliases=[sql])
+            ref = cache.put(raw, rows, int((time.monotonic() - started) * 1000),
+                            aliases=[sql])
+            # The reference travels back with the rows so the model can quote it to
+            # record_analysis. It cannot see its own tool_use_id.
+            return _text({"result_ref": ref, "row_count": len(rows), "rows": rows})
         return _text({"row_count": len(rows), "rows": rows})
 
     @tool(

@@ -28,8 +28,6 @@ def results():
     c = ResultCache()
     c.put("SELECT dx_code, count(*) FROM gold.icd_diagnoses WHERE dx_code IN ('D66') "
           "GROUP BY 1", [{"DX_CODE": "D66", "N": 42}], 120)
-    c.bind("toolu_aaa", "SELECT dx_code, count(*) FROM gold.icd_diagnoses "
-                        "WHERE dx_code IN ('D66') GROUP BY 1")
     return c
 
 
@@ -37,7 +35,7 @@ SPEC = {
     "title": "Hemophilia A patients",
     "subtitle": "Counts by diagnosis code",
     "note_template": "Data included all dates. Source: penn, gold.icd_diagnoses.",
-    "queries": [{"tool_use_id": "toolu_aaa", "primary": True,
+    "queries": [{"result_ref": "q1", "primary": True,
                  "sql_template": "SELECT dx_code, count(*) FROM gold.icd_diagnoses "
                                  "WHERE dx_code IN (:dx_codes) GROUP BY 1"}],
     "parameters": [{"name": "dx_codes", "kind": "diagnosis", "operator": "in",
@@ -67,12 +65,13 @@ def test_records_an_analysis_by_adopting_a_prior_result(conversation, results, r
 
 def test_refuses_when_the_result_was_never_cached(conversation, results, run):
     t = record_tool.build_tool(conversation, results, author="d@x.com")
-    spec = {**SPEC, "queries": [{"tool_use_id": "toolu_missing",
+    spec = {**SPEC, "queries": [{"result_ref": "q99",
                                  "sql_template": "SELECT 1 FROM nowhere"}]}
     res = run(t.handler(spec))
     assert res["is_error"]
     text = res["content"][0]["text"]
-    assert "toolu_missing" in text and "run_sql" in text, "the refusal must say how to fix it"
+    assert "q99" in text and "result_ref" in text, "the refusal must say how to fix it"
+    assert "q1" in text, "and must list what IS adoptable"
 
 
 def test_an_approximate_template_is_recorded_not_rejected(conversation, results, run):
@@ -130,7 +129,7 @@ def test_publish_is_refused_until_the_analyses_are_recorded(conversation, result
     assert res["is_error"]
     text = res["content"][0]["text"]
     assert "record_analysis" in text, "the refusal must name the tool"
-    assert "tool_use_id" in text, "and say to reuse the queries already run"
+    assert "result_ref" in text, "and say to reuse the queries already run"
     assert "publish_report again" in text, "and say what to do next"
 
 

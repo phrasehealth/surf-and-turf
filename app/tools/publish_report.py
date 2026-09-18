@@ -64,9 +64,9 @@ _RECORD_FIRST = (
     "analysis in a report must be recorded before it can be published.\n\n"
     "For each one, call:\n"
     "  record_analysis(title, subtitle, note_template,\n"
-    "                  queries=[{{tool_use_id, sql_template, purpose, primary}}],\n"
+    "                  queries=[{{result_ref, sql_template, purpose, primary}}],\n"
     "                  parameters, relations, joins, chart_type, chart_spec)\n\n"
-    "Pass the tool_use_id of the run_sql calls you already made, so nothing is "
+    "Pass the result_ref each run_sql returned, so nothing is "
     "re-run. Each call returns a label like 'A-1042.1'. Then call publish_report "
     "again with those labels in `analyses`, in the order they appear in the body."
 )

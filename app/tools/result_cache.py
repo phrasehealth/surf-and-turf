@@ -31,6 +31,7 @@ def digest(sql: str) -> str:
 
 @dataclass
 class CachedResult:
+    ref: str
     sql: str
     rows: list[dict[str, Any]]
     duration_ms: int
@@ -48,6 +49,8 @@ class ResultCache:
     ttl_s: float = TTL_S
     _results: "OrderedDict[str, CachedResult]" = field(default_factory=OrderedDict)
     _by_tool_use: dict[str, str] = field(default_factory=dict)
+    _by_ref: dict[str, str] = field(default_factory=dict)
+    _next_ref: int = 1
 
     # -- writing -----------------------------------------------------------
 
@@ -60,7 +63,13 @@ class ResultCache:
         Both have to find it: the agent quotes the former, the log holds the latter.
         """
         key = digest(sql)
-        entry = CachedResult(sql, rows, duration_ms, error)
+        # A short handle the model can quote back. The SDK never shows a model the
+        # tool_use_id of its own call, so an id it cannot see is useless as a key —
+        # the reference has to travel in the tool's own result.
+        ref = f"q{self._next_ref}"
+        self._next_ref += 1
+        entry = CachedResult(ref, sql, rows, duration_ms, error)
+        self._by_ref[ref] = key
         self._results[key] = entry
         self._results.move_to_end(key)
         for alias in aliases or []:
@@ -69,7 +78,7 @@ class ResultCache:
                 self._results[akey] = entry
                 self._results.move_to_end(akey)
         self._evict()
-        return key
+        return ref
 
     def bind(self, tool_use_id: str, sql: str) -> None:
         """Associate a tool call with the SQL it ran, seen on the event stream."""
@@ -81,6 +90,23 @@ class ResultCache:
     def get(self, tool_use_id: str) -> CachedResult | None:
         key = self._by_tool_use.get(tool_use_id)
         return self._get_key(key) if key else None
+
+    def get_by_ref(self, ref: str) -> CachedResult | None:
+        """By the handle `run_sql` returned — the reference the model can actually see."""
+        key = self._by_ref.get(str(ref or "").strip())
+        return self._get_key(key) if key else None
+
+    def recent(self, limit: int = 5) -> list[CachedResult]:
+        """Most recent first, for telling the agent what it can adopt."""
+        seen, out = set(), []
+        for entry in reversed(self._results.values()):
+            if entry.ref in seen:
+                continue
+            seen.add(entry.ref)
+            out.append(entry)
+            if len(out) >= limit:
+                break
+        return out
 
     def get_by_sql(self, sql: str) -> CachedResult | None:
         """Fallback when a tool_use_id is unknown but the SQL is quoted verbatim."""

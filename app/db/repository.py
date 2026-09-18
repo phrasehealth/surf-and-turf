@@ -273,7 +273,7 @@ async def record_analysis(*, conversation_id: str, title: str, subtitle: str | N
                 "        resolved_sql, template_verified, duration_ms, row_count, error,"
                 "        result_digest)"
                 " VALUES (:run, :q, :tool, :sql, :verified, :ms, :rows, :error, :digest)"
-            ), {"run": run_id, "q": qid, "tool": q.get("tool_use_id"),
+            ), {"run": run_id, "q": qid, "tool": q.get("result_ref"),
                 "sql": q.get("resolved_sql") or q["sql_template"],
                 "verified": q.get("template_verified"), "ms": q.get("duration_ms"),
                 "rows": q.get("row_count"), "error": q.get("error"),

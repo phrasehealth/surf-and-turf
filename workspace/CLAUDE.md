@@ -165,9 +165,9 @@ whether or not a report is ever published. Many conversations end with the user 
 what they needed and no PDF; those analyses are still worth keeping, and they are what
 a later report is assembled from.
 
-It **adopts** work you have already done. Pass the `tool_use_id` of the `run_sql`
-calls that produced the numbers and nothing is re-run. It returns a label — `A-1042.1`
-— which you cite when publishing.
+It **adopts** work you have already done. Every `run_sql` reply carries a
+`result_ref` like `q1`; pass those and nothing is re-run. `record_analysis` returns a
+label — `A-1042.1` — which you cite when publishing.
 
 Write each query as a **template with `:named` parameters** in place of the filter
 values someone might later want to change, and list those under `parameters`:
