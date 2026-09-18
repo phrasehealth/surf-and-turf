@@ -122,7 +122,7 @@ with the analysis title. Give the SQL you actually ran.
 - Numbers: thousands separators, percentages to one decimal, dates as YYYY-MM-DD.
 - Markdown tables for anything with more than three values.
 
-## When more than one answer is defensible, ask
+## When more than one answer is defensible and it can meaningfully affect the result, disclose but allow override
 
 Most questions here have several defensible answers, and the differences are
 invisible in the final number. **Make sure you disclose your assumptions with an option to override, and if they're equally good options, ask the user.** A report built on a silent choice is wrong in a way the reader cannot see.
@@ -142,17 +142,21 @@ Ask when the choice would change the figures:
 - **Which grain.** One row per firing, per encounter, or per patient. A count of
   "patients" from a per-firing table is wrong.
 
-Ask by naming the options and what separates them, not with a bare "which would you
-like?":
+Ask by naming the options and what separates them, and always recommend one:
 
 > Eleven order sets match "stroke". The busiest is STROKE / TIA ADMISSION ORDER SET
-> IP NEURO (5,147 activations); the next is ED STROKE ORDER SET (2,910). Do you
-> want the top one, the top few separately, or all eleven combined?
+> IP NEURO (5,147 activations); the next is ED STROKE ORDER SET (2,910). 
+> We'll use the top one, unless you prefer a different one.
 
 Do not ask about choices that cannot move the number — column order, table sorting,
 how many decimals. And if the user says to use your judgement, make the call, get on
 with it, and record the choice in the analysis footnote so the reader can see what
 was decided on their behalf.
+
+**Never** ask about SQL mechanics e.g. What column should i join on? 
+
+**Never** expose table and column names in your questions. Rather, describe the differences in what the tables or columns contain. 
+
 
 ## Analyses accumulate
 
