@@ -75,23 +75,32 @@ Each analysis has, in this order:
 
 Default to a Markdown table — it is exact, and most analyses want exact figures.
 
-Use a chart only when the shape matters more than the values: a trend over time, a
+Use a chart when the shape matters more than the values: a trend over time, a
 distribution, a ranking long enough that a table would be unreadable. A chart never
-replaces the numbers; if you chart something, the underlying figures still belong in
-a table or in the text.
+replaces the numbers; the figures still belong in a table or in the text.
 
-Charts are written as **inline SVG** directly in `body_markdown`. It passes through to
-the PDF. You have no tool that can create an image file, so inline SVG is the only way
-to draw one. Keep it self-contained:
+**You do not draw charts.** Declare one on `record_analysis` with `chart_type` and a
+`chart_spec` naming which result columns fill which channel, and the server draws it
+from the rows your query already returned:
 
-- Set `viewBox` plus explicit `width` and `height`.
-- No external references, no `<script>`, no web fonts — nothing that needs the network.
-- Label the axes and the units, and include the value on or beside each mark. A chart
-  whose numbers can only be estimated by eye is worse than the table it replaced.
-- Compute every coordinate from the data you actually queried. Do not sketch a shape
-  that looks approximately right.
+```
+chart_type  = "hbar"
+chart_spec  = {"category": "master_type", "value": "alert_count"}
+```
 
-If you cannot draw it accurately, use the table. That is always an acceptable choice.
+| chart_type | channels | use for |
+|---|---|---|
+| `hbar` | `category`, `value` | ranking across named categories |
+| `vbar` | `x`, `value` | a value across an ordered axis |
+| `line` | `x`, `value` | one series over time |
+| `lines` | `x`, `series`, `value` | several series over time |
+| `stacked` | `x`, `series`, `value` | composition within each group |
+| `stat_tiles` | `category`, `value` | a handful of headline figures |
+
+Never write `<svg>`, never choose a colour, and never write a figure number. Colours,
+axes, labels and the caption are the server's, so every report looks the same. If the
+chart cannot be drawn, `record_analysis` says why and still records the analysis —
+fix the spec and record it again with `supersedes`.
 
 ### Footnotes
 

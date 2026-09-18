@@ -136,6 +136,29 @@ body { background: none; }
 }
 /* The marking every other page gets from @bottom-center. The cover is
    full-bleed, so it carries its own. */
+/* Figures. Ported from pharma-consulting report_style.css — only the chart rules,
+   which are the ones that apply to markup this system actually produces. */
+.chart {
+  margin: 14pt 0 16pt;
+  break-inside: avoid;
+}
+.chart + .chart { margin-top: 18pt; }
+.chart__title {
+  font-family: var(--font-sans); font-weight: var(--fw-medium); font-size: 10pt;
+  color: var(--primary-950); margin-bottom: 2pt; break-after: avoid;
+}
+.chart__id {
+  font-family: var(--font-mono); font-size: 8.5pt; color: var(--fg-muted);
+  margin-right: 8pt; letter-spacing: 0.02em;
+}
+.chart__subtitle {
+  font-size: 9pt; color: var(--fg-muted); margin: 0 0 6pt; break-after: avoid;
+}
+.chart__note {
+  font-size: 8.5pt; color: var(--fg-muted); margin: 5pt 0 0; line-height: var(--lh-normal);
+}
+.chart svg { display: block; max-width: 100%; }
+
 .cover__marking {
   position: absolute; left: 22mm; right: 22mm; bottom: 8mm;
   text-align: center; font-family: var(--font-sans); font-weight: var(--fw-medium);

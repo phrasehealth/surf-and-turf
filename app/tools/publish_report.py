@@ -7,6 +7,7 @@ moment the file lands, independent of what the model says afterwards.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 from datetime import datetime
@@ -76,6 +77,42 @@ def _error(msg: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
 
+def _place_figures(body: str, runs: list[dict[str, Any]]) -> str:
+    """Insert each analysis's chart under its heading, captioned by position.
+
+    The model never writes a figure number: it is a property of where the chart
+    lands in this report, which is only known here (docs §3.2). A `{{figure:A-…}}`
+    placeholder is honoured for a cross-reference; otherwise the chart is appended
+    after the matching `##` section heading.
+    """
+    serial = 0
+    for run in runs:
+        if not run.get("chart_svg"):
+            continue
+        serial += 1
+        label = f"Figure {serial}"
+        block = (f'\n\n<figure class="chart">'
+                 f'<figcaption class="chart__title">'
+                 f'<span class="chart__id">{label}</span>{html.escape(run["title"])}'
+                 f'</figcaption>'
+                 + (f'<p class="chart__subtitle">{html.escape(run["subtitle"])}</p>'
+                    if run.get("subtitle") else "")
+                 + run["chart_svg"] + "</figure>\n\n")
+
+        marker = f"{{{{figure:{run.get('label', '')}}}}}"
+        if marker in body:
+            body = body.replace(marker, block)
+            continue
+        # No placeholder: put it under the heading whose text matches the analysis.
+        heading = f"## {run['title']}"
+        if heading in body:
+            idx = body.index(heading) + len(heading)
+            body = body[:idx] + block + body[idx:]
+        else:
+            body += block
+    return body
+
+
 def build_tool(conversation_id: str, on_published: OnPublished | None = None,
                author: str | None = None, database: str = ""):
     @tool(
@@ -117,9 +154,13 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None,
             # analysis, so this warns rather than refusing.
             log.warning("publish: %d analyses for %d body sections in %s",
                         len(resolved), sections, conversation_id[:8])
+        runs = await repository.runs_for_report(resolved)
+        # Figures are placed for rendering only. `body` stays exactly what the model
+        # wrote, so the stored record shows its work rather than ours.
+        rendered = _place_figures(body, runs)
         try:
             pdf = await asyncio.to_thread(
-                render_report_pdf, title, body, author, subtitle,
+                render_report_pdf, title, rendered, author, subtitle,
                 _cover_meta(author, database))
             stored = await storage.save(title, pdf, conversation_id)
         except Exception as e:
@@ -133,6 +174,7 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None,
                 published_by=author, handling_marking=settings.report_marking or None,
                 qcp_built_at=_pack_built_at(), body_markdown=body)
             await repository.link_report_contents(rec["id"], resolved)
+            await repository.record_figures(rec["id"], runs)
         except Exception:
             # The PDF exists and the user should get it; a bookkeeping failure is
             # logged, not raised back at the model as a publish failure.

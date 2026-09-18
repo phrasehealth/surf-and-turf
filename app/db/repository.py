@@ -260,14 +260,16 @@ async def record_analysis(*, conversation_id: str, title: str, subtitle: str | N
         run_id = (await conn.execute(text(
             "INSERT INTO analysis_runs (analysis_id, ran_by, origin, bound_params,"
             "                           database_name, role_name, error, freshness,"
-            "                           resolved_note)"
+            "                           resolved_note, chart_svg, chart_error)"
             " VALUES (:aid, :by, :origin, cast(:params AS jsonb), :db, :role, :error,"
-            "         cast(:freshness AS jsonb), :note) RETURNING id"
+            "         cast(:freshness AS jsonb), :note, :svg, :chart_error)"
+            " RETURNING id"
         ), {"aid": aid, "by": created_by, "origin": run.get("origin", "adopted"),
             "params": _json(run.get("bound_params") or {}), "db": run["database_name"],
             "role": run.get("role_name"), "error": run.get("error"),
             "freshness": _json(run["freshness"]) if run.get("freshness") else None,
-            "note": run.get("resolved_note")})).scalar_one()
+            "note": run.get("resolved_note"), "svg": run.get("chart_svg"),
+            "chart_error": run.get("chart_error")})).scalar_one()
 
         for qid, q in zip(query_ids, queries):
             await conn.execute(text(
@@ -292,6 +294,7 @@ async def list_analyses(conversation_id: str) -> list[dict[str, Any]]:
         rows = (await conn.execute(text(
             "SELECT a.id, a.serial, a.version, a.title, a.subtitle, a.chart_type,"
             "       'A-' || a.serial || '.' || a.version AS label, a.created_at,"
+            "       a.note_template,"
             "       (SELECT id FROM analysis_runs r WHERE r.analysis_id = a.id"
             "         ORDER BY ran_at DESC LIMIT 1) AS latest_run_id"
             "  FROM analyses a"
@@ -326,3 +329,46 @@ async def link_report_contents(report_id: Any, analyses: list[dict[str, Any]]) -
             "INSERT INTO report_contents (report_id, analysis_run_id, position)"
             " VALUES (:r, :run, :pos)"
         ), rows)
+
+
+async def runs_for_report(analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The latest run of each chosen analysis, with its chart, in the given order."""
+    ids = [a["latest_run_id"] for a in analyses if a.get("latest_run_id")]
+    if not ids:
+        return []
+    async with db.begin() as conn:
+        rows = (await conn.execute(text(
+            "SELECT r.id AS run_id, r.chart_svg, r.resolved_note, a.title, a.subtitle,"
+            "       a.chart_type"
+            "  FROM analysis_runs r JOIN analyses a ON a.id = r.analysis_id"
+            " WHERE r.id = ANY(:ids)"
+        ), {"ids": ids})).mappings().all()
+    by_id = {r["run_id"]: dict(r) for r in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def record_figures(report_id: Any, runs: list[dict[str, Any]]) -> int:
+    """One row per chart, captioned by its position in this report.
+
+    The SVG is copied rather than referenced: a published PDF must stay true to
+    itself even if the analysis is later corrected (docs §3.2).
+    """
+    rows, serial = [], 0
+    for run in runs:
+        if not run.get("chart_svg"):
+            continue
+        serial += 1
+        rows.append({"report": report_id, "run": run["run_id"], "serial": serial,
+                     "label": f"Figure {serial}", "chart_type": run["chart_type"] or "chart",
+                     "title": run["title"], "subtitle": run.get("subtitle"),
+                     "note": run.get("resolved_note"), "svg": run["chart_svg"]})
+    if not rows:
+        return 0
+    async with db.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO figures (report_id, analysis_run_id, serial, label, chart_type,"
+            "                     title, subtitle, note, svg)"
+            " VALUES (:report, :run, :serial, :label, :chart_type, :title, :subtitle,"
+            "         :note, :svg)"
+        ), rows)
+    return len(rows)

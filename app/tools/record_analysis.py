@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable
 from claude_agent_sdk import tool
 
 from ..config import settings
+from ..chart_render import ChartError, describe_channels, render as render_chart
 from ..db import repository
 from .result_cache import ResultCache, bind_template, matches
 
@@ -97,10 +98,13 @@ SCHEMA: dict[str, Any] = {
             },
         },
         "chart_type": {"type": "string",
-                       "description": "hbar | vbar | stacked | lines | stat_tiles, or omit "
-                                      "for a table-only analysis."},
+                       "enum": ["hbar", "vbar", "line", "lines", "stacked", "stat_tiles"],
+                       "description": "Omit for a table-only analysis. The chart is drawn "
+                                      "by the server from the primary query's rows — do "
+                                      "not write SVG and do not choose colours."},
         "chart_spec": {"type": "object",
-                       "description": "Which result columns map to which channel."},
+                       "description": "Which result columns fill which channel. "
+                                      + describe_channels()},
         "supersedes": {"type": "string",
                        "description": "An earlier label, e.g. 'A-1042.1', when correcting it. "
                                       "Makes a new version rather than a separate analysis."},
@@ -158,6 +162,22 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
                 "includes a `result_ref` like 'q1' — pass that.\n\n"
                 f"Available now:\n{listing}")
 
+        # Draw the chart now, while the rows are in hand: the server does not keep
+        # them, and a chart drawn later from a re-run could disagree with the table.
+        chart_svg, chart_error = None, None
+        if args.get("chart_type"):
+            primary = next((a for a in adopted if a.get("primary")), adopted[0])
+            source = (cache.get_by_ref(primary.get("result_ref", ""))
+                      or cache.get_by_sql(primary.get("resolved_sql", "")))
+            try:
+                chart_svg = render_chart(args["chart_type"], args.get("chart_spec"),
+                                         source.rows if source else [])
+            except ChartError as e:
+                # Not fatal: the analysis and its numbers are still worth recording,
+                # and the agent is told plainly so it can fix the spec and re-record.
+                chart_error = str(e)
+                log.info("chart not drawn for %s: %s", args["title"], e)
+
         supersedes_serial = _serial_of(args.get("supersedes"))
         try:
             rec = await repository.record_analysis(
@@ -169,6 +189,7 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
                 relations=[_split(r) for r in (args.get("relations") or [])],
                 joins=args.get("joins") or [],
                 run={"origin": "adopted", "bound_params": params,
+                     "chart_svg": chart_svg, "chart_error": chart_error,
                      "database_name": database or "unknown",
                      "role_name": settings.snowflake_role or None,
                      "freshness": freshness() if freshness else None,
@@ -183,6 +204,8 @@ def build_tool(conversation_id: str, cache: ResultCache, author: str | None = No
         unverified = [q for q in adopted if not q["template_verified"]]
         payload: dict[str, Any] = {"status": "recorded", "label": rec["label"],
                                    "queries": len(adopted)}
+        if args.get("chart_type"):
+            payload["chart"] = args["chart_type"] if chart_svg else f"not drawn: {chart_error}"
         if unverified:
             # Not a failure — the template only has to be close (§7) — but the agent
             # should know, because a refresh will run the template, not what ran today.
