@@ -676,15 +676,12 @@ def lines(x_labels, series, title: str, note: str = "", subtitle: str = "",
     # Inline rather than through _frame, which has no legend slot — the same
     # shape stacked() and vstacked() return, so all three read identically.
     return (
-        '<figure class="chart">'
-        f"{caption(title)}"
-        + (f'<p class="chart__subtitle">{esc(subtitle)}</p>' if subtitle else "")
+        '<div class="chart__body">'
         + legend(names, colours)
         + f'<svg viewBox="0 0 {VIEW_W} {height}" width="100%" '
           f'height="{height}" role="img" xmlns="http://www.w3.org/2000/svg">'
         + "".join(out) + "</svg>"
-        + (f'<p class="chart__note">{esc(note)}</p>' if note else "")
-        + "</figure>"
+        + "</div>"
     )
 
 
@@ -764,9 +761,7 @@ def vstacked(bins, categories, title: str, note: str = "",
     # Built inline rather than through _frame, which has no legend slot —
     # the same shape stacked() returns, so the two read identically on a page.
     return (
-        '<figure class="chart">'
-        f"{caption(title)}"
-        + (f'<p class="chart__subtitle">{esc(subtitle)}</p>' if subtitle else "")
+        '<div class="chart__body">'
         + legend(categories, colours)
         + f'<svg viewBox="0 0 {VIEW_W} {height}" width="100%" height="{height}" '
           'role="img" xmlns="http://www.w3.org/2000/svg">'
@@ -774,8 +769,7 @@ def vstacked(bins, categories, title: str, note: str = "",
         # esc(), as _frame() and the others do. A chart note is plain text:
         # it usually carries a medication or component name straight from the
         # data, and one contract for the parameter beats two.
-        + (f'<p class="chart__note">{esc(note)}</p>' if note else "")
-        + "</figure>"
+        + "</div>"
     )
 
 
@@ -998,9 +992,7 @@ def grid(cells, row_labels, col_labels, title: str, note: str = "",
                    for c in col_labels)
 
     return (
-        '<figure class="chart">'
-        f"{caption(title)}"
-        + (f'<p class="chart__subtitle">{esc(subtitle)}</p>' if subtitle else "")
+        '<div class="chart__body">'
         + '<table class="grid">'
         + '<thead><tr><th class="grid__corner">'
         + (f'<span class="grid__axis">{esc(col_heading)} &rarr;</span>'
@@ -1013,8 +1005,7 @@ def grid(cells, row_labels, col_labels, title: str, note: str = "",
         + f'<tfoot><tr><th class="grid__row">Total</th>{foot}'
         + f'<td class="grid__total">{sum(values):,}</td></tr></tfoot>'
         + "</table>"
-        + (f'<p class="chart__note">{esc(note)}</p>' if note else "")
-        + "</figure>"
+        + "</div>"
     )
 
 
@@ -1190,15 +1181,12 @@ def stacked(rows, categories, title: str, note: str = "", subtitle: str = "",
     out.append(f'<line x1="{left}" y1="{top - 6}" x2="{left}" '
                f'y2="{height - bottom + 2}" stroke="{GRID}" stroke-width="1"/>')
     return (
-        '<figure class="chart">'
-        f"{caption(title)}"
-        + (f'<p class="chart__subtitle">{esc(subtitle)}</p>' if subtitle else "")
+        '<div class="chart__body">'
         + legend(categories, colours)
         + f'<svg viewBox="0 0 {VIEW_W} {height}" width="100%" height="{height}" '
           'role="img" xmlns="http://www.w3.org/2000/svg">'
         + "".join(out) + "</svg>"
-        + (f'<p class="chart__note">{esc(note)}</p>' if note else "")
-        + "</figure>"
+        + "</div>"
     )
 
 # --------------------------------------------------------------------------

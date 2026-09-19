@@ -39,12 +39,19 @@ def _column(rows: list[dict[str, Any]], name: str, what: str) -> list[Any]:
 
 
 def _numeric(values: list[Any], what: str) -> list[float]:
+    """Numbers, with whole values kept whole.
+
+    A count formatted from a float reads `3,428.0`. Most of what gets charted here
+    is a count, so a value that is already an integer stays one and only genuinely
+    fractional data carries a decimal point.
+    """
     out = []
     for v in values:
         try:
-            out.append(float(v if v is not None else 0))
+            n = float(v if v is not None else 0)
         except (TypeError, ValueError):
             raise ChartError(f"chart_spec.{what} must be numeric; got {v!r}")
+        out.append(int(n) if n.is_integer() else n)
     return out
 
 
@@ -98,10 +105,78 @@ def _stacked(rows, spec) -> str:
 
     order = list(dict.fromkeys(groups))
     categories = list(dict.fromkeys(cats))
-    table = {g: {c: 0.0 for c in categories} for g in order}
+    table = {g: {c: 0 for c in categories} for g in order}
     for g, c, v in zip(groups, cats, values):
         table[g][c] += v
     return charts.stacked([(g, table[g]) for g in order], categories, title="")
+
+
+def _grid(rows, spec) -> str:
+    """A count per (row, column) pair, shaded by magnitude.
+
+    The form a co-occurrence or transition matrix wants. The same data ranked as
+    "A + B" bars spends its length axis on a value the reader must first parse out
+    of a label, and loses which rows are large, which columns are large, and which
+    pairs never happen at all.
+    """
+    r = [str(v) for v in _column(rows, spec.get("row"), "row")]
+    c = [str(v) for v in _column(rows, spec.get("column"), "column")]
+    v = _numeric(_column(rows, spec.get("value"), "value"), "value")
+
+    cells = {}
+    for a, b, n in zip(r, c, v):
+        cells[(a, b)] = cells.get((a, b), 0) + n
+    row_labels = list(dict.fromkeys(r))[:MAX_CATEGORIES]
+    col_labels = list(dict.fromkeys(c))[:MAX_CATEGORIES]
+    return charts.grid(cells, row_labels, col_labels, title="",
+                       row_heading=str(spec.get("row_heading") or ""),
+                       col_heading=str(spec.get("column_heading") or ""),
+                       # A pairing matrix has no meaningful diagonal: a drug is not
+                       # co-prescribed with itself.
+                       diagonal_blank=bool(spec.get("diagonal_blank")))
+
+
+def _signed_hbar(rows, spec) -> str:
+    """A ranked bar chart whose values may be negative, scaled symmetrically."""
+    pairs = _pairs(rows, spec, "category", "value")
+    if spec.get("sort", "desc") == "desc":
+        pairs.sort(key=lambda p: -p[1])
+    return charts.signed_hbar(pairs[:MAX_CATEGORIES], title="",
+                              unit=str(spec.get("unit") or ""),
+                              negligible=float(spec.get("negligible") or 0))
+
+
+def _vstacked(rows, spec) -> str:
+    """Stacked columns with the scale on the y axis — a histogram's shape."""
+    groups = [str(v) for v in _column(rows, spec.get("x"), "x")]
+    cats = [str(v) for v in _column(rows, spec.get("series"), "series")]
+    values = _numeric(_column(rows, spec.get("value"), "value"), "value")
+
+    order = list(dict.fromkeys(groups))
+    categories = list(dict.fromkeys(cats))
+    table = {g: {c: 0 for c in categories} for g in order}
+    for g, c, n in zip(groups, cats, values):
+        table[g][c] += n
+    # Thin the x labels when there are more bins than will legibly fit.
+    every = max(1, len(order) // 15)
+    return charts.vstacked([(g, table[g]) for g in order], categories, title="",
+                           axis_label=str(spec.get("axis_label") or ""),
+                           tick_every=every)
+
+
+def _sankey(rows, spec) -> str:
+    """Where one grouping's population ends up in another."""
+    lefts = [str(v) for v in _column(rows, spec.get("source"), "source")]
+    rights = [str(v) for v in _column(rows, spec.get("target"), "target")]
+    values = _numeric(_column(rows, spec.get("value"), "value"), "value")
+
+    flows = {}
+    for a, b, n in zip(lefts, rights, values):
+        flows[(a, b)] = flows.get((a, b), 0) + n
+    left_order = list(dict.fromkeys(lefts))[:MAX_CATEGORIES]
+    right_order = list(dict.fromkeys(rights))[:MAX_CATEGORIES]
+    return charts.sankey(flows, left_order, right_order, title="",
+                         unit=str(spec.get("unit") or "rows"))
 
 
 def _stat_tiles(rows, spec) -> str:
@@ -114,17 +189,23 @@ def _stat_tiles(rows, spec) -> str:
 
 
 FORMS: dict[str, Callable[[list[dict[str, Any]], dict[str, Any]], str]] = {
-    "hbar": _hbar, "vbar": _vbar, "line": _line, "lines": _lines,
-    "stacked": _stacked, "stat_tiles": _stat_tiles,
+    "hbar": _hbar, "signed_hbar": _signed_hbar, "vbar": _vbar,
+    "line": _line, "lines": _lines,
+    "stacked": _stacked, "vstacked": _vstacked,
+    "grid": _grid, "sankey": _sankey, "stat_tiles": _stat_tiles,
 }
 
 # What each form needs in chart_spec, for the tool description and for errors.
 CHANNELS = {
     "hbar": ("category", "value"),
+    "signed_hbar": ("category", "value"),
     "vbar": ("x", "value"),
     "line": ("x", "value"),
     "lines": ("x", "series", "value"),
     "stacked": ("x", "series", "value"),
+    "vstacked": ("x", "series", "value"),
+    "grid": ("row", "column", "value"),
+    "sankey": ("source", "target", "value"),
     "stat_tiles": ("category", "value"),
 }
 

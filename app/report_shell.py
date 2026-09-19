@@ -158,6 +158,97 @@ body { background: none; }
   font-size: 8.5pt; color: var(--fg-muted); margin: 5pt 0 0; line-height: var(--lh-normal);
 }
 .chart svg { display: block; max-width: 100%; }
+/* A chart that needs a legend or emits a table builds its own body fragment
+   rather than going through _frame(); the caption is still added at publish. */
+.chart__body { display: block; }
+
+   equal, which is what makes the shading comparable across the grid. */
+.grid {
+  margin-top: var(--sp-3);
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.grid__corner { width: 46mm; position: relative; }
+.grid__axis {
+  display: block;
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  font-size: 6.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  text-align: right;
+}
+.grid__axis--row { text-align: left; }
+.grid th {
+  font-weight: var(--fw-medium);
+  font-size: 6.5pt;
+  color: var(--fg-muted);
+  vertical-align: bottom;
+  padding: 0 2px var(--sp-1) 2px;
+  border-bottom: 1px solid var(--border-default);
+}
+.grid__col { text-align: center; }
+.grid__row {
+  width: 46mm;
+  text-align: left;
+  font-size: 7.5pt;
+  color: var(--fg-default);
+  padding-right: var(--sp-2);
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border-default);
+}
+.grid__cell {
+  text-align: center;
+  padding: 3pt 2px;
+  border: 1px solid var(--surface, #fff);
+  font-family: var(--font-mono);
+  font-size: 7.5pt;
+}
+.grid__n { font-variant-numeric: tabular-nums; }
+/* A pair that never happened: blank, not a nought. "Never" and "zero times"
+   are the same fact and blank reads faster across a sparse matrix. */
+.grid__cell--none { background: var(--bg-surface); }
+/* The diagonal, where staying put is not a transition. */
+.grid__cell--self { background: var(--bg-surface); color: var(--fg-subtle); }
+.grid__total {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 7.5pt;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  padding: 3pt 2px;
+}
+.grid tfoot .grid__total, .grid tfoot .grid__row {
+  border-top: 1px solid var(--border-strong);
+  font-weight: var(--fw-medium);
+  color: var(--fg-default);
+}
+/* Legend for the stacked composition charts. Two or more series always get
+   one — identity must never rest on colour alone. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  margin-bottom: var(--sp-2);
+}
+.legend__key {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8pt;
+  color: var(--fg-muted);
+  /* Keys wrap between themselves, never inside a class name. */
+  white-space: nowrap;
+}
+.legend__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
 
 .cover__marking {
   position: absolute; left: 22mm; right: 22mm; bottom: 8mm;

@@ -91,11 +91,21 @@ chart_spec  = {"category": "master_type", "value": "alert_count"}
 | chart_type | channels | use for |
 |---|---|---|
 | `hbar` | `category`, `value` | ranking across named categories |
+| `signed_hbar` | `category`, `value` | differences that can be negative, scaled symmetrically |
 | `vbar` | `x`, `value` | a value across an ordered axis |
 | `line` | `x`, `value` | one series over time |
 | `lines` | `x`, `series`, `value` | several series over time |
-| `stacked` | `x`, `series`, `value` | composition within each group |
+| `stacked` | `x`, `series`, `value` | composition within each group, bars horizontal |
+| `vstacked` | `x`, `series`, `value` | the same, bars vertical — a histogram's shape |
+| `grid` | `row`, `column`, `value` | a value per pair: co-occurrence, transitions |
+| `sankey` | `source`, `target`, `value` | where one grouping's population ends up in another |
 | `stat_tiles` | `category`, `value` | a handful of headline figures |
+
+A pairing or transition matrix wants `grid`, not a ranked bar chart of "A + B"
+strings: a bar chart of N² pairs spends its length axis on a value the reader has to
+parse out of a label, and loses which rows are large, which columns are large, and
+which pairs never happen at all. Set `diagonal_blank: true` when a row paired with
+itself is structurally meaningless.
 
 Never write `<svg>`, never choose a colour, and never write a figure number. Colours,
 axes, labels and the caption are the server's, so every report looks the same. If the

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -154,3 +155,42 @@ def test_the_model_never_writes_a_figure_number(conversation, results, db_conn, 
         async with db_conn.begin() as conn:
             return (await conn.execute(text("SELECT label FROM figures"))).scalar_one()
     assert run(_label()) == "Figure 1", "the caption is the server's"
+
+
+# ------------------------------------------------- the less common forms
+
+@pytest.mark.parametrize("chart_type,spec,rows", [
+    ("grid", {"row": "A", "column": "B", "value": "N", "diagonal_blank": True},
+     [{"A": "Clonazepam", "B": "Gabapentin", "N": 3428},
+      {"A": "Gabapentin", "B": "Levetiracetam", "N": 2740}]),
+    ("sankey", {"source": "S", "target": "T", "value": "N"},
+     [{"S": "ED", "T": "Admitted", "N": 412}, {"S": "ED", "T": "Home", "N": 1890}]),
+    ("signed_hbar", {"category": "C", "value": "V", "unit": "%"},
+     [{"C": "LGL", "V": 12.4}, {"C": "EMI", "V": -3.1}]),
+    ("vstacked", {"x": "X", "series": "S", "value": "N"},
+     [{"X": "Jan", "S": "A", "N": 40}, {"X": "Jan", "S": "B", "N": 60},
+      {"X": "Feb", "S": "A", "N": 55}, {"X": "Feb", "S": "B", "N": 45}]),
+])
+def test_every_exposed_form_draws(chart_type, spec, rows):
+    """These four sat unused in charts.py and had broken on the port without anyone
+    noticing — they called a captioning helper that figure numbering had removed."""
+    out = render(chart_type, spec, rows)
+    assert "<svg" in out or "<table" in out
+    assert "caption" not in out, "chrome is added at publish, not by the renderer"
+
+
+def test_a_grid_shows_counts_as_whole_numbers():
+    """A count rendered from a float reads '3,428.0'."""
+    out = render("grid", {"row": "A", "column": "B", "value": "N"},
+                 [{"A": "x", "B": "y", "N": 3428}])
+    assert "3,428" in out and "3,428.0" not in out
+
+
+def test_every_form_in_the_dispatcher_is_documented():
+    """A form the agent cannot learn about may as well not be exposed."""
+    from app.chart_render import CHANNELS, FORMS
+
+    assert set(FORMS) == set(CHANNELS)
+    claude_md = (Path(__file__).resolve().parents[1] / "workspace" / "CLAUDE.md").read_text()
+    for name in FORMS:
+        assert f"`{name}`" in claude_md, f"{name} is not listed in CLAUDE.md"
