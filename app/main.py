@@ -90,6 +90,13 @@ async def _selectable_databases() -> list[str]:
     return available_databases()
 
 
+@app.get("/c/{cid}", response_class=HTMLResponse)
+async def conversation_page(cid: str):
+    """The same single page. The path names the conversation, so a refresh resumes it:
+    the client replays the stored transcript and reconnects the socket."""
+    return HTMLResponse((ROOT / "static" / "index.html").read_text())
+
+
 @app.get("/healthz")
 async def healthz():
     # Persistence is required, so a database that is down means the app cannot do

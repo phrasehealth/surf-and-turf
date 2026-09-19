@@ -82,3 +82,19 @@ def test_the_database_is_recorded_and_cannot_change(client):
     assert body["database"] == "MOCK_DB_FIXTURE"
     got = client.get(f"/conversations/{body['conversation_id']}").json()
     assert got["database"] == "MOCK_DB_FIXTURE"
+
+
+def test_a_conversation_url_serves_the_app(client):
+    """Refreshing /c/<id> must return the page, not a 404.
+
+    Regression: this route was once deleted by an unrelated edit and nothing noticed,
+    because the only thing that exercises it is a browser reload.
+    """
+    r = client.get("/c/1b18672b-0f11-4079-b512-fcb0e54ba1c1")
+    assert r.status_code == 200
+    assert "<title>Report Agent</title>" in r.text
+
+
+def test_an_unknown_conversation_still_serves_the_page(client):
+    """The client decides what to show; the server does not need to know the id yet."""
+    assert client.get("/c/00000000-0000-0000-0000-000000000000").status_code == 200
