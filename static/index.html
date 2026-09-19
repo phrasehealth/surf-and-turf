@@ -155,7 +155,6 @@
         <button class="send" id="askSend">Send</button>
       </div>
     </div>
-    <div class="hint">A conversation is tied to one database and cannot change it.</div>
   </section>
 
   <!-- a conversation -->
@@ -164,7 +163,7 @@
     <div class="askbox">
       <textarea id="input" rows="1" placeholder="Reply… (Enter to send, Shift+Enter for newline)"></textarea>
       <div class="askrow">
-        <span class="hint" id="composerHint"></span>
+        <span></span>
         <button class="send" id="send" type="submit">Send</button>
       </div>
     </div>
@@ -186,7 +185,6 @@
   const dbTag    = document.getElementById('dbTag');
   const convList = document.getElementById('convList');
   const convTitle = document.getElementById('convTitle');
-  const composerHint = document.getElementById('composerHint');
 
   let ws = null, cid = null, busy = false, current = null, thinkingEl = null;
   const tools = new Map();     // tool_use_id -> element
@@ -329,7 +327,6 @@
 
   function showDatabase(name) {
     dbTag.textContent = name; dbTag.classList.remove('hidden');
-    composerHint.textContent = `Querying ${name} — a conversation cannot change database.`;
   }
 
   // ---------------------------------------------------------------- sidebar

@@ -23,10 +23,16 @@ browser ──ws──> FastAPI ──> ClaudeSDKClient (one per conversation)
 The ClaudeSDKClient package can spawn Claude Code CLI processes which act as the orchestrator (the agent loop and deciding which tool to call next). That runs within a container, having access to certain set of tools and files.
  
 * Built in Tools: Read/Glob/Grep
-* Custom tools: run_sql, list_tables, describe_table, publish_report (in-process MCP server)
+* Custom tools: run_sql, list_tables, describe_table, record_analysis, publish_report (in-process MCP server)
 * (Anything outside this list of tools is denied by default - i.e. no bash, no write, and no network)
-* Files Loaded every conversation - claude.md plus its two @ imports qcp/README.md and qcp/index.md
-* Files reachable on demand: Everything in /workspace is available to read/glob/grap, and nothing outside that folder.
+* Files loaded every conversation: `workspace/CLAUDE.md`, shared across databases, plus
+  that conversation's `qcp/README.md` and `qcp/index.md`. The pack arrives through the
+  per-session system prompt rather than through `@` imports, because one static
+  `CLAUDE.md` cannot name a different pack per conversation.
+* Files reachable on demand: everything under the conversation's own database
+  directory, `workspace/<database>/`, and nothing outside it. One pack per database,
+  and a `PreToolUse` hook (`app/workspace_guard.py`) refuses any path that resolves
+  elsewhere — so one tenant's schema cannot be globbed or grepped from another's.
 
 
 ## Layout
