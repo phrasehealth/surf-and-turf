@@ -73,11 +73,14 @@
   form.composer { border-top: 1px solid var(--line); padding: 12px 20px 18px; }
   form.composer .askbox { margin: 0 auto; }
 
-  .msg { margin: 16px 0; display: flex; gap: 12px; }
-  .msg .who { flex: 0 0 52px; font-size: 12px; color: var(--muted); padding-top: 9px; text-align: right; }
-  .msg .body { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-               padding: 10px 14px; overflow-wrap: anywhere; min-width: 0; }
-  .msg.user .body { background: var(--user); white-space: pre-wrap; }
+  /* The speaker is evident from the shape: a user turn is a right-aligned bubble,
+     an agent turn is plain text on the page. No labels, as in ChatGPT. */
+  .msg { margin: 18px 0; display: flex; }
+  .msg .body { overflow-wrap: anywhere; min-width: 0; }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .body { max-width: 66%; background: var(--user); border-radius: 18px;
+                    padding: 10px 16px; white-space: pre-wrap; }
+  .msg.agent .body { flex: 1; background: none; border: 0; padding: 0; }
   .msg .body p { margin: 0 0 8px; } .msg .body p:last-child { margin-bottom: 0; }
   .msg .body table { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; width: 100%; }
   .msg .body th, .msg .body td { border: 1px solid var(--line); padding: 4px 8px; }
@@ -90,7 +93,7 @@
      Connection and agent errors are not steps and stay. */
   body:not(.show-steps) .tool,
   body:not(.show-steps) .error.step { display: none; }
-  .tool { margin: 6px 0 6px 64px; font-size: 12.5px; color: var(--muted); background: var(--tool);
+  .tool { margin: 6px 0; font-size: 12.5px; color: var(--muted); background: var(--tool);
           border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; }
   .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
                flex: 0 0 8px; margin-top: 6px; animation: pulse 1s infinite; }
@@ -101,23 +104,22 @@
   @keyframes pulse { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
 
   /* Not a message, so not a message bubble. */
-  .thinking .body { display: inline-flex; gap: 5px; align-items: center;
-                    background: none; border: none; padding: 12px 2px; }
+  .thinking .body { display: inline-flex; gap: 5px; align-items: center; padding: 6px 2px; }
   .thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
                 animation: blink 1.4s infinite both; }
   .thinking i:nth-child(2) { animation-delay: .2s }
   .thinking i:nth-child(3) { animation-delay: .4s }
   @keyframes blink { 0%,80%,100% { opacity: .25 } 40% { opacity: 1 } }
 
-  .report { margin: 10px 0 10px 64px; display: flex; align-items: center; gap: 14px;
+  .report { margin: 12px 0; display: flex; align-items: center; gap: 14px;
             background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; }
   .report .icon { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent);
                   border-radius: 5px; padding: 3px 6px; }
   .report .t { flex: 1; } .report .title { font-weight: 600; font-size: 14px; }
   .report .sub { font-size: 12px; color: var(--muted); }
   .report a { color: var(--accent); font-size: 13px; }
-  .error { margin: 8px 0 8px 64px; color: var(--err); font-size: 13px; }
-  .meta { margin: 2px 0 8px 64px; font-size: 11.5px; color: var(--muted); }
+  .error { margin: 8px 0; color: var(--err); font-size: 13px; }
+  .meta { margin: 2px 0 10px; font-size: 11.5px; color: var(--muted); }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -223,7 +225,7 @@
 
   function addMsg(who, text) {
     const el = document.createElement('div'); el.className = 'msg ' + who;
-    el.innerHTML = `<div class="who">${who === 'user' ? 'You' : 'Agent'}</div><div class="body"></div>`;
+    el.innerHTML = '<div class="body"></div>';
     const body = el.querySelector('.body');
     if (who === 'user') body.textContent = text; else body.innerHTML = md(text || '');
     thread.appendChild(el); scroll(); return el;
@@ -253,7 +255,7 @@
     if (thinkingEl || current) return;
     thinkingEl = document.createElement('div');
     thinkingEl.className = 'msg agent thinking';
-    thinkingEl.innerHTML = '<div class="who">Agent</div><div class="body"><i></i><i></i><i></i></div>';
+    thinkingEl.innerHTML = '<div class="body"><i></i><i></i><i></i></div>';
     thread.appendChild(thinkingEl); scroll();
   }
   function hideThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
