@@ -73,7 +73,8 @@ A pack whose `MANIFEST.md` carries `fixture: true` describes sample data rather 
 warehouse. The database picker offers fixture packs only when `SNOWFLAKE_MODE=mock`
 and real packs only when it is `real` — a fixture pack against a live warehouse, or a
 real pack against the mock backend, both send the agent looking for relations that are
-not there. `workspace/analytics/` is the committed fixture for the offline path.
+not there. `workspace/mock_db_fixture/` is the committed fixture for the offline path — named so that no real
+database can collide with it.
 
 ## Known gaps
 

@@ -30,7 +30,7 @@ def client(migrated_database):
 def test_conversation_roundtrip_publishes_pdf(tmp_path, client):
     if True:
         c = client
-        cid = c.post("/conversations", json={"database": "ANALYTICS"}).json()["conversation_id"]
+        cid = c.post("/conversations", json={"database": "MOCK_DB_FIXTURE"}).json()["conversation_id"]
         with c.websocket_connect(f"/ws/{cid}") as ws:
             assert ws.receive_json()["type"] == "hello"
             ws.send_json({"prompt": "generate the report as a pdf"})
@@ -74,11 +74,11 @@ def test_an_unavailable_database_is_refused(client):
 def test_only_databases_with_a_pack_are_offered_by_the_api(client):
     """The picker offers schema knowledge we hold, not everything the role can reach."""
     dbs = client.get("/databases").json()["databases"]
-    assert "ANALYTICS" in dbs, "the mock pack is committed for the offline path"
+    assert "MOCK_DB_FIXTURE" in dbs, "the mock pack is committed for the offline path"
 
 
 def test_the_database_is_recorded_and_cannot_change(client):
-    body = client.post("/conversations", json={"database": "ANALYTICS"}).json()
-    assert body["database"] == "ANALYTICS"
+    body = client.post("/conversations", json={"database": "MOCK_DB_FIXTURE"}).json()
+    assert body["database"] == "MOCK_DB_FIXTURE"
     got = client.get(f"/conversations/{body['conversation_id']}").json()
-    assert got["database"] == "ANALYTICS"
+    assert got["database"] == "MOCK_DB_FIXTURE"

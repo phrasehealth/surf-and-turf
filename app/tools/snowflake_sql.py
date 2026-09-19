@@ -121,14 +121,21 @@ def _jsonable(v: Any) -> Any:
 
 
 class MockBackend:
-    """Deterministic sample data so the stack runs without Snowflake."""
+    """Deterministic sample data so the stack runs without Snowflake.
+
+    The database is called MOCK_DB_FIXTURE rather than something plausible like
+    ANALYTICS on purpose. A pack lives at `workspace/<database>/qcp/`, so a database
+    name that a tenant might really use would collide with the committed fixture: the
+    extractor would overwrite it, drop its `fixture: true` flag, and leave mock mode
+    with no pack at all.
+    """
 
     TABLES = {
-        "ANALYTICS.CDS.ALERT_FIRINGS": [
+        "MOCK_DB_FIXTURE.CDS.ALERT_FIRINGS": [
             ("ALERT_ID", "VARCHAR"), ("ALERT_NAME", "VARCHAR"), ("FIRED_AT", "TIMESTAMP_NTZ"),
             ("FACILITY", "VARCHAR"), ("ACCEPTED", "BOOLEAN"),
         ],
-        "ANALYTICS.CDS.ALERT_DAILY": [
+        "MOCK_DB_FIXTURE.CDS.ALERT_DAILY": [
             ("DAY", "DATE"), ("ALERT_NAME", "VARCHAR"), ("FIRINGS", "NUMBER"),
             ("ACCEPT_RATE", "FLOAT"),
         ],

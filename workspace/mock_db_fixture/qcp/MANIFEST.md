@@ -1,7 +1,7 @@
-# Query Context Pack — analytics
+# Query Context Pack — mock_db_fixture
 
 qcp_version: 1.0
-pack_name: analytics
+pack_name: mock_db_fixture
 built_at: 2026-09-19T12:55:24Z
 database_placeholder: {database}
 schemas: cds

@@ -3,7 +3,7 @@ data/
 # Generated Query Context Pack (build it: scripts/query_context_pack_extractors/)
 workspace/*/qcp/
 # except the mock fixture, which the offline path needs
-!workspace/analytics/qcp/
+!workspace/mock_db_fixture/qcp/
 __pycache__/
 *.pyc
 .pytest_cache/

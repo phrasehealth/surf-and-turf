@@ -143,15 +143,15 @@ def test_fixture_and_real_packs_are_never_offered_together(tmp_path, workspace_a
 
     (tmp_path / "penn" / "qcp").mkdir(parents=True)
     (tmp_path / "penn" / "qcp" / "MANIFEST.md").write_text("pack_name: penn\n")
-    (tmp_path / "analytics" / "qcp").mkdir(parents=True)
-    (tmp_path / "analytics" / "qcp" / "MANIFEST.md").write_text(
-        "pack_name: analytics\nfixture: true\n")
+    (tmp_path / "mock_db_fixture" / "qcp").mkdir(parents=True)
+    (tmp_path / "mock_db_fixture" / "qcp" / "MANIFEST.md").write_text(
+        "pack_name: mock_db_fixture\nfixture: true\n")
     workspace_at(tmp_path)
 
     snowflake_mode("real")
     assert agent_mod.available_databases() == ["PENN"]
     snowflake_mode("mock")
-    assert agent_mod.available_databases() == ["ANALYTICS"]
+    assert agent_mod.available_databases() == ["MOCK_DB_FIXTURE"]
 
 
 def test_a_pack_without_the_flag_is_treated_as_real():

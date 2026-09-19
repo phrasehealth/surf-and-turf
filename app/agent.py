@@ -357,7 +357,7 @@ class MockAgentSession(AgentSession):
 
             tid = "toolu_" + uuid.uuid4().hex[:8]
             sql = ("SELECT day, alert_name, firings, accept_rate "
-                   "FROM ANALYTICS.CDS.ALERT_DAILY ORDER BY day")
+                   "FROM MOCK_DB_FIXTURE.CDS.ALERT_DAILY ORDER BY day")
             yield {"type": "tool_use", "id": tid, "name": f"mcp__{MCP_SERVER_NAME}__run_sql",
                    "summary": sql}
             res = await self._sql_tools["run_sql"].handler({"sql": sql})
@@ -388,7 +388,7 @@ class MockAgentSession(AgentSession):
                     "subtitle": "Firings and acceptance by day",
                     "note_template": "Data included days between "
                                      f"{rows[0]['DAY']} and {rows[-1]['DAY']}. "
-                                     "Source: ANALYTICS.CDS.ALERT_DAILY (mock data).",
+                                     "Source: MOCK_DB_FIXTURE.CDS.ALERT_DAILY (mock data).",
                     "queries": [{"result_ref": result_ref, "sql_template": sql,
                                  "primary": True}],
                     "parameters": [], "relations": ["CDS.ALERT_DAILY"], "joins": [],
@@ -406,7 +406,7 @@ class MockAgentSession(AgentSession):
                 pid = "toolu_" + uuid.uuid4().hex[:8]
                 body = ("## Summary\n\nAlert acceptance improved steadily across the week.\n\n"
                         "## Daily detail\n\n" + table + "\n\n## Method\n\nSource: "
-                        "`ANALYTICS.CDS.ALERT_DAILY` (mock data).")
+                        "`MOCK_DB_FIXTURE.CDS.ALERT_DAILY` (mock data).")
                 yield {"type": "tool_use", "id": pid, "name": f"mcp__{MCP_SERVER_NAME}__publish_report",
                        "summary": _summarize_input("publish_report", {"title": "Sepsis Screen Weekly", "body_markdown": body})}
                 res = await self._publish.handler(
