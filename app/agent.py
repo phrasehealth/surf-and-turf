@@ -79,17 +79,41 @@ def workspace_for(database: str) -> Path:
 
 
 def available_databases() -> list[str]:
-    """Databases we hold a pack for. A conversation cannot start without one.
+    """Databases we hold a usable pack for. A conversation cannot start without one.
 
     Read from disk rather than asked of Snowflake: the question is not what the role
     can reach, it is what we have schema knowledge for. Offering a database with no
     pack would hand the agent another tenant's schema, or none at all.
+
+    Fixture packs and real packs are never offered together. A pack built from the
+    mock fixtures describes tables that do not exist in any warehouse, and a pack
+    built from a warehouse describes tables the mock backend has never heard of —
+    either mismatch sends the agent looking for relations that are not there. The
+    pack says which it is; `SNOWFLAKE_MODE` says which is wanted.
     """
     root = Path(settings.workspace_dir)
     if not root.is_dir():
         return []
-    return sorted(p.name.upper() for p in root.iterdir()
-                  if p.is_dir() and (p / "qcp" / "MANIFEST.md").is_file())
+    want_fixture = settings.snowflake_mode != "real"
+    out = []
+    for p in sorted(root.iterdir()):
+        manifest = p / "qcp" / "MANIFEST.md"
+        if not (p.is_dir() and manifest.is_file()):
+            continue
+        if _is_fixture(manifest) is want_fixture:
+            out.append(p.name.upper())
+    return out
+
+
+def _is_fixture(manifest: Path) -> bool:
+    """Whether a pack describes sample data rather than a warehouse."""
+    try:
+        for line in manifest.read_text().splitlines():
+            if line.startswith("fixture:"):
+                return line.split(":", 1)[1].strip().lower() in {"true", "yes", "1"}
+    except OSError:
+        pass
+    return False
 
 
 def _pack_context(workspace: Path) -> str:

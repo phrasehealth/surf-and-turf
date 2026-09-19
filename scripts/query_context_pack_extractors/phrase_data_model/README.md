@@ -67,6 +67,14 @@ A different transform tool means replacing `transforms.py` only — it is the on
 that knows what a dbt manifest looks like. A pack built from `introspect.py` and
 `render.py` alone is valid at L0.
 
+## Fixture packs
+
+A pack whose `MANIFEST.md` carries `fixture: true` describes sample data rather than a
+warehouse. The database picker offers fixture packs only when `SNOWFLAKE_MODE=mock`
+and real packs only when it is `real` — a fixture pack against a live warehouse, or a
+real pack against the mock backend, both send the agent looking for relations that are
+not there. `workspace/analytics/` is the committed fixture for the offline path.
+
 ## Known gaps
 
 - **Column-level lineage is thin.** Only the 56 edges whose dbt column description

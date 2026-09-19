@@ -149,3 +149,21 @@ def workspace_at():
 
     yield _set
     object.__setattr__(cfg.settings, "workspace_dir", original)
+
+
+@pytest.fixture
+def snowflake_mode():
+    """Pin SNOWFLAKE_MODE for one test, then restore it.
+
+    Several tests care which packs are on offer, and that now depends on the mode:
+    fixture packs are offered in mock mode, real packs in real mode.
+    """
+    import app.config as cfg
+
+    original = cfg.settings.snowflake_mode
+
+    def _set(mode: str):
+        object.__setattr__(cfg.settings, "snowflake_mode", mode)
+
+    yield _set
+    object.__setattr__(cfg.settings, "snowflake_mode", original)

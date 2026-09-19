@@ -85,9 +85,11 @@ def test_the_database_is_stored_with_the_conversation(db_conn, run):
 
 # ------------------------------------------------- one pack, one database
 
-def test_only_databases_with_a_pack_are_offered(tmp_path, workspace_at):
+def test_only_databases_with_a_pack_are_offered(tmp_path, workspace_at, snowflake_mode):
     """Offering a database we have no schema for would hand the agent the wrong pack."""
     from app import agent as agent_mod
+
+    snowflake_mode("real")      # these are warehouse packs, not fixtures
 
     for name in ("penn", "baptistmemorial"):
         (tmp_path / name / "qcp").mkdir(parents=True)
@@ -131,3 +133,30 @@ def test_the_pack_reaches_the_model_through_the_system_prompt():
     assert "--- qcp/README.md ---" in appended
     assert "PENN database and cannot change it" in appended
     assert opts.cwd.endswith("/penn")
+
+
+def test_fixture_and_real_packs_are_never_offered_together(tmp_path, workspace_at,
+                                                          snowflake_mode):
+    """A fixture pack against a warehouse, or a real pack against the mock backend,
+    both point the agent at relations that do not exist where it is querying."""
+    from app import agent as agent_mod
+
+    (tmp_path / "penn" / "qcp").mkdir(parents=True)
+    (tmp_path / "penn" / "qcp" / "MANIFEST.md").write_text("pack_name: penn\n")
+    (tmp_path / "analytics" / "qcp").mkdir(parents=True)
+    (tmp_path / "analytics" / "qcp" / "MANIFEST.md").write_text(
+        "pack_name: analytics\nfixture: true\n")
+    workspace_at(tmp_path)
+
+    snowflake_mode("real")
+    assert agent_mod.available_databases() == ["PENN"]
+    snowflake_mode("mock")
+    assert agent_mod.available_databases() == ["ANALYTICS"]
+
+
+def test_a_pack_without_the_flag_is_treated_as_real():
+    """Packs built before the flag existed describe warehouses, not fixtures."""
+    from app.agent import _is_fixture
+    from app.config import settings
+
+    assert _is_fixture(Path(settings.workspace_dir) / "penn" / "qcp" / "MANIFEST.md") is False

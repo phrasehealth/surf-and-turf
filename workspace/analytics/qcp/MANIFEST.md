@@ -8,6 +8,10 @@ schemas: cds
 relations: 2
 columns: 9
 conformance: L0
+# Sample data, not a warehouse. Offered only when SNOWFLAKE_MODE=mock:
+# picking it against a real Snowflake would give the agent fixture schema
+# to write real SQL against.
+fixture: true
 index_schemas: cds
 evidence_present: introspected
 sources:
