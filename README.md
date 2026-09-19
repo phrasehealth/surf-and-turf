@@ -44,9 +44,11 @@ static/index.html       Single-file chat UI (streaming text, tool activity, down
 app/db/                 Persistence: engine, repository, event writer, SDK session store
 alembic/                Migrations (`alembic upgrade head`)
 workspace/              What the agent sees as its project
-  CLAUDE.md             Agent instructions; @-imports the pack's README and index
+  CLAUDE.md             Shared agent instructions (found by walking up from cwd)
   README.md             Hand-written data notes the pack cannot supply
-  qcp/                  Generated Query Context Pack — gitignored, build it (below)
+  <database>/qcp/       One Query Context Pack per database. A conversation's cwd is
+                        its own database directory, so Glob and Grep cannot reach
+                        another tenant's schema. Gitignored except the mock fixture.
 scripts/
   check_snowflake.py      Connectivity check for the SNOWFLAKE_* settings
   check_bedrock.py        Connectivity check for Bedrock model access
@@ -103,6 +105,7 @@ Fill in three groups:
 | **Snowflake** | `SNOWFLAKE_MODE=real`, plus `ACCOUNT`, `USER`, `ROLE`, `WAREHOUSE`, `DATABASE`. For key-pair auth put the key in `secrets/` (git-ignored) and set `SNOWFLAKE_PRIVATE_KEY_PATH`. Give the role `SELECT` only. |
 | **Pack build** | `SNOWFLAKE_ETL_DIR` — your `snowflake-etl` checkout, read for dbt manifests. |
 | **Database** | `DATABASE_URL`. Required. See above. |
+| **Pack** | Build one per Snowflake database you want to query (below). |
 
 `.env` is loaded by `app/config.py`, so a bare `uvicorn` picks it up; real environment
 variables still win, which keeps `AGENT_MODE=mock uvicorn ...` working.
@@ -130,8 +133,11 @@ The Query Context Pack is a digested set of data that helps the application navi
 
 ```bash
 python scripts/query_context_pack_extractors/phrase_data_model/build.py \
-    --stage introspect --stage render --stage validate
+    --database penn --stage introspect --stage render --stage validate
 ```
+
+`--database` is required: a pack describes one database and decides where it lands.
+The database picker offers exactly the databases you have built a pack for.
 
 That is enough for the app to run and for the agent to stop guessing column names. Add
 the rest as it becomes worth it:

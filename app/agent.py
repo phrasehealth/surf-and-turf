@@ -22,6 +22,7 @@ import json
 import logging
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
@@ -39,7 +40,7 @@ log = logging.getLogger("report-agent.agent")
 Event = dict[str, Any]
 MCP_SERVER_NAME = "reporting"
 
-SYSTEM_APPEND = """
+SYSTEM_APPEND_TEMPLATE = """
 You are a reporting analyst assistant. You have read-only access to Snowflake via
 the `run_sql`, `list_tables` and `describe_table` tools, and you can read the
 project workspace with Read/Glob/Grep.
@@ -64,6 +65,49 @@ Where more than one relation, grain, date field or denominator could answer the
 question, ask the user which they want rather than choosing silently. Say what the
 options are and what separates them.
 """
+
+
+def workspace_for(database: str) -> Path:
+    """The directory a conversation works in: its own database and nothing else.
+
+    One pack per database, each under its own directory, and `cwd` points at the one
+    this conversation is bound to. That is what stops Glob and Grep from reaching a
+    different tenant's schema. `CLAUDE.md` is shared and found by walking up, so the
+    instructions are not duplicated per database.
+    """
+    return Path(settings.workspace_dir) / (database or "").strip().lower()
+
+
+def available_databases() -> list[str]:
+    """Databases we hold a pack for. A conversation cannot start without one.
+
+    Read from disk rather than asked of Snowflake: the question is not what the role
+    can reach, it is what we have schema knowledge for. Offering a database with no
+    pack would hand the agent another tenant's schema, or none at all.
+    """
+    root = Path(settings.workspace_dir)
+    if not root.is_dir():
+        return []
+    return sorted(p.name.upper() for p in root.iterdir()
+                  if p.is_dir() and (p / "qcp" / "MANIFEST.md").is_file())
+
+
+def _pack_context(workspace: Path) -> str:
+    """The pack's README and index, for the system prompt.
+
+    These were `@`-imports in CLAUDE.md, which cannot vary per conversation now that
+    each database has its own pack. `_build_options()` runs per session, so the
+    per-conversation facts belong here instead — one shared CLAUDE.md, no duplication
+    and no generation step.
+    """
+    parts = []
+    for name in ("README.md", "index.md"):
+        path = workspace / "qcp" / name
+        try:
+            parts.append(f"\n\n--- qcp/{name} ---\n{path.read_text()}")
+        except OSError:
+            log.warning("pack file missing: %s", path)
+    return "".join(parts)
 
 
 def _summarize_input(name: str, inp: dict[str, Any]) -> str:
@@ -131,6 +175,8 @@ class AgentSession:
     def _build_options(self):
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, create_sdk_mcp_server
 
+        workspace = workspace_for(self._database)
+
         tools = snowflake_sql.build_tools(self.results, self._database) + [
             record_tool.build_tool(self.id, self.results, author=self.user_id,
                                    database=self._database),
@@ -148,13 +194,17 @@ class AgentSession:
             env["AWS_REGION"] = settings.aws_region
 
         return ClaudeAgentOptions(
-            cwd=str(settings.workspace_dir),
+            cwd=str(workspace),
             # Mirror transcripts to Postgres and resume from them. The local copy
             # under CLAUDE_CONFIG_DIR is ephemeral; this is the durable one.
             session_store=session_store,
             resume=self.sdk_session_id,
             setting_sources=["project"],  # loads workspace/CLAUDE.md
-            system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_APPEND},
+            system_prompt={"type": "preset", "preset": "claude_code",
+                           "append": SYSTEM_APPEND_TEMPLATE
+                           + f"\n\nThis conversation queries the "
+                             f"{self._database.upper()} database and cannot change it."
+                           + _pack_context(workspace)},
             tools=builtin,
             allowed_tools=builtin + mcp_tool_names,
             mcp_servers={MCP_SERVER_NAME: server},
@@ -164,7 +214,9 @@ class AgentSession:
             # file call, so the workspace boundary is enforced there.
             hooks={"PreToolUse": [HookMatcher(
                 matcher="|".join(guard_tools),
-                hooks=[build_hook(settings.workspace_dir, self.id)],
+                # Confined to this conversation's database, not the whole workspace:
+                # another tenant's pack is as off-limits as the Snowflake key.
+                hooks=[build_hook(workspace, self.id)],
             )]},
             model=settings.model,
             max_turns=settings.max_turns,

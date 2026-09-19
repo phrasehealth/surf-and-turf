@@ -132,3 +132,20 @@ def db_conn(migrated_database, db_loop):
 def run(db_loop):
     """Run a coroutine on the test's event loop — see `db_loop` for why it matters."""
     return db_loop.run_until_complete
+
+
+@pytest.fixture
+def workspace_at():
+    """Point settings.workspace_dir somewhere for one test, then put it back.
+
+    `Settings` is a frozen dataclass, so monkeypatch cannot set attributes on it.
+    """
+    import app.config as cfg
+
+    original = cfg.settings.workspace_dir
+
+    def _set(path):
+        object.__setattr__(cfg.settings, "workspace_dir", path)
+
+    yield _set
+    object.__setattr__(cfg.settings, "workspace_dir", original)

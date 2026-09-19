@@ -403,8 +403,8 @@ confidently wrong number that nothing downstream catches.
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--work", default=str(config.DEFAULT_WORK))
-    ap.add_argument("--out", default=str(config.DEFAULT_OUT))
+    ap.add_argument("--work", required=True)
+    ap.add_argument("--out", required=True)
     args = ap.parse_args()
     res = render(Path(args.work), Path(args.out))
     print(f"rendered {args.out}")

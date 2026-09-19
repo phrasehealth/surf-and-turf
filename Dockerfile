@@ -18,12 +18,13 @@ COPY static ./static
 # Design system: tokens + the .woff2 files the report shell references.
 # Fonts are resolved from disk at render time; nothing is fetched.
 COPY assets ./assets
-# Includes workspace/qcp, the Query Context Pack the agent reads. Build it
-# before `docker build`:  python scripts/query_context_pack_extractors/\
-#   phrase_data_model/build.py
+# Includes workspace/<database>/qcp — one pack per database, which is what
+# keeps one tenant's schema out of another's Glob and Grep. Build before
+# `docker build`; at least one is required.
 COPY workspace ./workspace
-RUN test -f ./workspace/qcp/index.md \
-    || (echo 'ERROR: workspace/qcp is missing; build the Query Context Pack first' \
+RUN ls ./workspace/*/qcp/index.md >/dev/null 2>&1 \
+    || (echo 'ERROR: no Query Context Pack found. Build at least one:' \
+        && echo '  python scripts/query_context_pack_extractors/phrase_data_model/build.py --database <db>' \
         && exit 1)
 
 # Writable locations: report output (local mode) and Claude Code's config dir.

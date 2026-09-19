@@ -1,7 +1,9 @@
 .env
 data/
 # Generated Query Context Pack (build it: scripts/query_context_pack_extractors/)
-workspace/qcp/
+workspace/*/qcp/
+# except the mock fixture, which the offline path needs
+!workspace/analytics/qcp/
 __pycache__/
 *.pyc
 .pytest_cache/

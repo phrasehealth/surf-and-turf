@@ -34,14 +34,20 @@ PROJECTS = {
 PROFILES_YML = "profiles.yml"  # relative to SNOWFLAKE_ETL_DIR
 
 # --- outputs --------------------------------------------------------------
-# The pack lands inside the agent's workspace, so it is simply a subdirectory of
-# the project the agent already has open: relative paths in the pack's own
-# README resolve, and the Dockerfile's `COPY workspace` ships it. Build the pack
-# before building the image.
-DEFAULT_OUT = REPO_ROOT / "workspace" / "qcp"
-# Intermediate facts stay outside the workspace: they are build state, not
-# context, and the agent must never read them.
-DEFAULT_WORK = REPO_ROOT / "data" / "qcp-work"
+# One pack per database, each in its own directory under the workspace. A
+# conversation's `cwd` is that directory, which is what keeps one tenant's schema
+# out of another's Glob and Grep.
+WORKSPACE = REPO_ROOT / "workspace"
+
+
+def out_dir(database: str) -> Path:
+    return WORKSPACE / database.strip().lower() / "qcp"
+
+
+def work_dir(database: str) -> Path:
+    # Intermediate facts stay outside the workspace: they are build state, not
+    # context, and the agent must never read them.
+    return REPO_ROOT / "data" / "qcp-work" / database.strip().lower()
 
 # --- introspection --------------------------------------------------------
 # Schemas to describe. Empty means "every schema the role can see".

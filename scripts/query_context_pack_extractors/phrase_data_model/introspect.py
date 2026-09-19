@@ -85,14 +85,13 @@ async def introspect(backend: SnowflakeBackend, database: str) -> list[Relation]
     return list(rels.values())
 
 
-async def main_async(work: Path) -> int:
+async def main_async(work: Path, database: str) -> int:
     if settings.snowflake_mode != "real":
         raise SystemExit("SNOWFLAKE_MODE must be 'real' to introspect")
-    database = settings.snowflake_database
     if not database:
-        raise SystemExit("SNOWFLAKE_DATABASE is not set")
+        raise SystemExit("--database is required")
 
-    backend = SnowflakeBackend()
+    backend = SnowflakeBackend(database)
     print(f"introspecting {database} ...")
     rels = await introspect(backend, database)
 
@@ -119,9 +118,10 @@ async def main_async(work: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--work", default=str(config.DEFAULT_WORK), help="work directory")
+    ap.add_argument("--work", required=True, help="work directory")
+    ap.add_argument("--database", required=True, help="the database to describe")
     args = ap.parse_args()
-    return asyncio.run(main_async(Path(args.work)))
+    return asyncio.run(main_async(Path(args.work), args.database))
 
 
 if __name__ == "__main__":

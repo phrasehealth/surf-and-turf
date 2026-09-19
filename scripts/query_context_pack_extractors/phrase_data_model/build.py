@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 """Build a Query Context Pack for the Phrase data model, end to end.
 
-    python build.py                      # L2: introspect + transforms + render
-    python build.py --freshness          # L3: adds a MAX(date) scan per relation
-    python build.py --joins --profiles   # L4: adds the expensive measurement
-    python build.py --stage render       # re-render from cached facts, no queries
+    python build.py --database penn                 # L2, no table is scanned
+    python build.py --database penn --freshness     # L3
+    python build.py --database penn --joins --profiles
+    python build.py --database penn --stage render  # re-render, no queries
+
+`--database` is required: a pack describes one database, and it decides where the
+pack lands. Each conversation's workspace is that directory, so a tenant's schema
+cannot leak into another's.
 
 Stages are ordered cheapest-first (spec §7.5) so a useful pack exists before any
 scanning starts, and each writes its facts to the work directory, so re-running
@@ -35,9 +39,13 @@ def run(script: str, *args: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    # Required: a pack describes one database, and which one is not guessable.
+    # It also decides where the pack lands, since the agent's cwd is that directory.
+    ap.add_argument("--database", required=True,
+                    help="the database to describe, e.g. penn")
     ap.add_argument("--project", default="epic", choices=sorted(config.PROJECTS))
-    ap.add_argument("--work", default=str(config.DEFAULT_WORK))
-    ap.add_argument("--out", default=str(config.DEFAULT_OUT))
+    ap.add_argument("--work", default=None)
+    ap.add_argument("--out", default=None)
     ap.add_argument("--stage", action="append",
                     choices=["introspect", "transforms", "render", "validate"],
                     help="run only these cheap stages (repeatable)")
@@ -48,10 +56,13 @@ def main() -> int:
     args = ap.parse_args()
 
     stages = args.stage or ["introspect", "transforms", "render", "validate"]
-    w, o = ["--work", args.work], ["--out", args.out]
+    work = args.work or str(config.work_dir(args.database))
+    out = args.out or str(config.out_dir(args.database))
+    w, o = ["--work", work], ["--out", out]
+    db = ["--database", args.database]
 
     if "introspect" in stages:
-        run("introspect.py", *w)
+        run("introspect.py", *w, *db)
     if "transforms" in stages:
         run("transforms.py", "--project", args.project, *w)
     force = ["--force"] if args.force else []
@@ -64,7 +75,7 @@ def main() -> int:
     if "render" in stages:
         run("render.py", *w, *o)
     if "validate" in stages:
-        run("validate.py", "--pack", args.out)
+        run("validate.py", "--pack", out)
     return 0
 
 

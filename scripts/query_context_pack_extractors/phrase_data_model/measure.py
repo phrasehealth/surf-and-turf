@@ -272,7 +272,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("what", choices=["freshness", "joins", "profiles"])
-    ap.add_argument("--work", default=str(config.DEFAULT_WORK))
+    ap.add_argument("--work", required=True)
     ap.add_argument("--schema", action="append", help="limit to a schema (repeatable)")
     ap.add_argument("--relation", help="profiles: a single relation name")
     ap.add_argument("--force", action="store_true",

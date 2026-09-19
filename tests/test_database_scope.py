@@ -8,6 +8,7 @@ hard-coded another, and nothing stopped it.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -80,3 +81,53 @@ def test_the_database_is_stored_with_the_conversation(db_conn, run):
     cid = str(uuid.uuid4())
     run(repo.create_conversation(cid, "d@x.com", "baptist"))
     assert run(repo.get_conversation(cid))["database"] == "baptist"
+
+
+# ------------------------------------------------- one pack, one database
+
+def test_only_databases_with_a_pack_are_offered(tmp_path, workspace_at):
+    """Offering a database we have no schema for would hand the agent the wrong pack."""
+    from app import agent as agent_mod
+
+    for name in ("penn", "baptistmemorial"):
+        (tmp_path / name / "qcp").mkdir(parents=True)
+        (tmp_path / name / "qcp" / "MANIFEST.md").write_text(f"pack_name: {name}\n")
+    (tmp_path / "temple").mkdir()                     # a directory, but no pack
+    (tmp_path / "CLAUDE.md").write_text("shared")     # not a database
+
+    workspace_at(tmp_path)
+    assert agent_mod.available_databases() == ["BAPTISTMEMORIAL", "PENN"]
+
+
+def test_the_workspace_is_the_conversations_database():
+    from app.agent import workspace_for
+    from app.config import settings
+
+    assert workspace_for("PENN") == Path(settings.workspace_dir) / "penn"
+    assert workspace_for("BaptistMemorial").name == "baptistmemorial"
+
+
+def test_a_session_is_confined_to_its_own_database(tmp_path, workspace_at):
+    """The guard is the boundary: another tenant's pack is as off-limits as a secret."""
+    from app.agent import workspace_for
+    from app.workspace_guard import check
+
+    workspace_at(tmp_path)
+    mine = workspace_for("penn")
+
+    assert check("Read", {"file_path": "qcp/index.md"}, mine)[0]
+    allowed, reason = check("Read", {"file_path": "../baptistmemorial/qcp/columns.tsv"}, mine)
+    assert not allowed and "outside the workspace" in reason
+    assert not check("Grep", {"pattern": "x", "path": "../baptistmemorial"}, mine)[0]
+
+
+def test_the_pack_reaches_the_model_through_the_system_prompt():
+    """CLAUDE.md is shared and cannot vary, so the per-database pack goes here."""
+    from app.agent import AgentSession
+
+    opts = AgentSession("c1", user_id="d@x.com", database="PENN")._build_options()
+    appended = opts.system_prompt["append"]
+    assert "--- qcp/index.md ---" in appended
+    assert "--- qcp/README.md ---" in appended
+    assert "PENN database and cannot change it" in appended
+    assert opts.cwd.endswith("/penn")

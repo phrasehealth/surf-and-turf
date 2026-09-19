@@ -179,7 +179,7 @@ def validate(pack: Path) -> Report:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pack", default=str(config.DEFAULT_OUT))
+    ap.add_argument("--pack", required=True)
     args = ap.parse_args()
     pack = Path(args.pack)
     if not pack.exists():

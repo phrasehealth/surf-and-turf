@@ -1,0 +1,10 @@
+schema	relation	column	type	nullable	raw_name	evidence	description
+cds	alert_daily	accept_rate	FLOAT	YES		introspected	
+cds	alert_daily	alert_name	VARCHAR	YES		introspected	
+cds	alert_daily	day	DATE	YES		introspected	
+cds	alert_daily	firings	NUMBER	YES		introspected	
+cds	alert_firings	accepted	BOOLEAN	YES		introspected	
+cds	alert_firings	alert_id	VARCHAR	YES		introspected	
+cds	alert_firings	alert_name	VARCHAR	YES		introspected	
+cds	alert_firings	facility	VARCHAR	YES		introspected	
+cds	alert_firings	fired_at	TIMESTAMP_NTZ	YES		introspected	

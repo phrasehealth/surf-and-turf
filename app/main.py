@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import (Body, FastAPI, HTTPException, Request, WebSocket,
                      WebSocketDisconnect)
@@ -79,40 +77,17 @@ async def index():
     return (STATIC / "index.html").read_text()
 
 
-_DB_CACHE: dict[str, Any] = {"at": 0.0, "names": []}
-
-
 async def _selectable_databases() -> list[str]:
-    """What the configured role can actually use, cached briefly.
+    """Databases a conversation may be started against: the ones we hold a pack for.
 
-    Mock mode has no catalogue to ask, so it offers a single stand-in rather than
-    blocking the offline path.
+    Read from disk rather than asked of Snowflake. The question is not what the role
+    can reach — it is what we have schema knowledge for, and offering a database with
+    no pack would give the agent another tenant's schema or none at all. It also
+    removes a multi-second warehouse round trip from page load.
     """
-    if settings.snowflake_mode != "real":
-        # The database the mock fixtures live in, so the same guard applies offline.
-        from .tools.snowflake_sql import MockBackend
+    from .agent import available_databases
 
-        return sorted({t.split(".")[0] for t in MockBackend.TABLES})
-    if time.time() - _DB_CACHE["at"] < 300 and _DB_CACHE["names"]:
-        return _DB_CACHE["names"]
-    from .tools.snowflake_sql import SnowflakeBackend
-
-    try:
-        rows = await SnowflakeBackend().run(
-            "SELECT database_name FROM snowflake.information_schema.databases "
-            "ORDER BY 1")
-        names = [r["DATABASE_NAME"] for r in rows]
-    except Exception as exc:
-        log.warning("could not list databases: %s", exc)
-        return _DB_CACHE["names"]
-    _DB_CACHE.update(at=time.time(), names=names)
-    return names
-
-
-@app.get("/c/{cid}")
-async def conversation_page(cid: str):
-    """The same single page. The path names the conversation so a refresh resumes it."""
-    return HTMLResponse((ROOT / "static" / "index.html").read_text())
+    return available_databases()
 
 
 @app.get("/healthz")
@@ -132,9 +107,8 @@ async def healthz():
 async def list_databases():
     """Databases a conversation may be started against.
 
-    Temporary: this asks Snowflake what the configured role can see. It becomes a
-    property of the signed-in user's session, at which point the choice is made for
-    the user rather than offered to them.
+    Temporary: the choice is offered here until it becomes a property of the
+    signed-in user's session, at which point it is made for the user.
     """
     return {"databases": await _selectable_databases()}
 

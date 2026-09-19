@@ -71,6 +71,12 @@ def test_an_unavailable_database_is_refused(client):
     assert "not available" in str(r.json())
 
 
+def test_only_databases_with_a_pack_are_offered_by_the_api(client):
+    """The picker offers schema knowledge we hold, not everything the role can reach."""
+    dbs = client.get("/databases").json()["databases"]
+    assert "ANALYTICS" in dbs, "the mock pack is committed for the offline path"
+
+
 def test_the_database_is_recorded_and_cannot_change(client):
     body = client.post("/conversations", json={"database": "ANALYTICS"}).json()
     assert body["database"] == "ANALYTICS"

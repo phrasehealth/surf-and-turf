@@ -138,7 +138,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", default="epic", choices=sorted(config.PROJECTS))
-    ap.add_argument("--work", default=str(config.DEFAULT_WORK))
+    ap.add_argument("--work", required=True)
     args = ap.parse_args()
     work = Path(args.work)
 

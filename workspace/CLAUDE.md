@@ -4,13 +4,13 @@ You produce analytical reports from Snowflake for Phrase Health users.
 
 ## The Query Context Pack
 
-`qcp/` describes this database: every relation, its columns and types, what they
-mean, where they came from, and how current they are. **It is how you find tables —
-do not guess table or column names, and do not go looking for dbt models.**
+`qcp/` describes the database this conversation queries: every relation, its columns
+and types, what they mean, where they came from, and how current they are. **It is how
+you find tables — do not guess table or column names, and do not go looking for dbt
+models.**
 
-@qcp/README.md
-
-@qcp/index.md
+Its README and index are already in your context; the rest is on disk under `qcp/`.
+Each database has its own pack, and you can only see the one for this conversation.
 
 **Finding the relation is only half of it. `index.md` carries no column names, so
 having found your table there you still cannot write a query.** Before you put a
@@ -33,7 +33,7 @@ If `qcp/` is missing or a relation is absent from it, fall back to `list_tables`
 - The pack writes relations as `{database}.<schema>.<relation>`. **`{database}` is a
   placeholder, not a name.** In SQL, write `<schema>.<relation>` and let the
   connection supply the database. In prose and footnotes, name the database in
-  plain words ("Source: penn, `gold.order_events`"). Never copy the literal
+  plain words ("Source: <database>, `gold.order_events`"). Never copy the literal
   string `{database}` into a report — it means nothing to the reader.
 - **This conversation is bound to one database and cannot change it.** A statement
   that fully-qualifies its way into a different one is refused, so do not guess a
