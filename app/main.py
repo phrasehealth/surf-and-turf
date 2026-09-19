@@ -109,6 +109,12 @@ async def _selectable_databases() -> list[str]:
     return names
 
 
+@app.get("/c/{cid}")
+async def conversation_page(cid: str):
+    """The same single page. The path names the conversation so a refresh resumes it."""
+    return HTMLResponse((ROOT / "static" / "index.html").read_text())
+
+
 @app.get("/healthz")
 async def healthz():
     # Persistence is required, so a database that is down means the app cannot do

@@ -61,6 +61,10 @@ async def get_conversation(conversation_id: str) -> dict[str, Any] | None:
 async def list_conversations(user_id: str | None, limit: int = 50) -> list[dict[str, Any]]:
     sql = ("SELECT c.id, c.serial, c.user_id, c.database, c.started_at, c.last_used_at,"
            "       c.total_cost_usd,"
+           # The first prompt is the conversation's name until something better
+           # exists — it is what the person actually asked for.
+           "       (SELECT t.prompt FROM turns t WHERE t.conversation_id = c.id"
+           "         ORDER BY t.seq LIMIT 1) AS title,"
            "       (SELECT count(*) FROM turns t WHERE t.conversation_id = c.id) AS turns,"
            "       (SELECT count(*) FROM reports r WHERE r.origin_conversation_id = c.id)"
            "         AS reports"

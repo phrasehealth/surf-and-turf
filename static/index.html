@@ -6,62 +6,101 @@
 <title>Report Agent</title>
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #fff; --ink: #1b1f24; --muted: #6b7280; --line: #e5e7eb;
-    --accent: #2563eb; --accent-ink: #fff; --user: #eef2ff; --tool: #f8fafc; --err: #b91c1c; --ok: #15803d;
+    --bg: #ffffff; --side: #f7f7f8; --panel: #fff; --ink: #1b1f24; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --user: #f2f4f8; --tool: #f8fafc;
+    --err: #b91c1c; --ok: #15803d; --side-hover: #ececef;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1216; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa3ad; --line: #2a3038;
-            --user: #1e2536; --tool: #12161b; }
+    :root { --bg: #101317; --side: #171a1f; --panel: #171b21; --ink: #e6e8eb;
+            --muted: #9aa3ad; --line: #2a3038; --user: #1e2536; --tool: #12161b;
+            --side-hover: #22262d; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
-           border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header .status { font-size: 12px; color: var(--muted); }
-  header .status b { color: var(--ok); font-weight: 600; }
-  header button { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 6px;
-                  padding: 4px 10px; cursor: pointer; font-size: 13px; }
-  main { max-width: 860px; margin: 0 auto; padding: 16px 16px 140px; }
-  .msg { margin: 12px 0; display: flex; gap: 10px; }
-  .msg .who { flex: 0 0 64px; font-size: 12px; color: var(--muted); padding-top: 8px; text-align: right; }
-  .msg .body { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-               padding: 10px 14px; overflow-wrap: anywhere; }
+  body { margin: 0; background: var(--bg); color: var(--ink); height: 100vh; display: flex;
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+  /* ---------- sidebar ---------- */
+  aside { width: 260px; flex: 0 0 260px; background: var(--side); border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; height: 100vh; }
+  aside .top { padding: 12px; }
+  aside .brand { font-size: 13px; font-weight: 600; color: var(--muted); padding: 4px 8px 12px; }
+  .newchat { width: 100%; text-align: left; padding: 9px 12px; border: 1px solid var(--line);
+             border-radius: 9px; background: var(--panel); color: var(--ink); cursor: pointer;
+             font: inherit; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .newchat:hover { background: var(--side-hover); }
+  aside .list { flex: 1; overflow-y: auto; padding: 4px 8px 16px; }
+  aside .list h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--muted); margin: 14px 8px 6px; font-weight: 600; }
+  .conv { display: block; padding: 8px 10px; border-radius: 8px; color: inherit;
+          text-decoration: none; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; cursor: pointer; }
+  .conv:hover { background: var(--side-hover); }
+  .conv.active { background: var(--side-hover); font-weight: 600; }
+  .conv .meta { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  aside .foot { padding: 10px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  aside .foot label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* ---------- main ---------- */
+  main { flex: 1; display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 10px 20px; border-bottom: 1px solid var(--line); font-size: 12.5px;
+            color: var(--muted); min-height: 44px; }
+  .topbar .dbtag { font-family: Menlo, Consolas, monospace; font-size: 11.5px;
+                   border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+
+  /* the empty state: an ask-anything box, centred */
+  .welcome { flex: 1; display: flex; flex-direction: column; align-items: center;
+             justify-content: center; gap: 18px; padding: 24px; }
+  .welcome h1 { font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .welcome .sub { color: var(--muted); font-size: 14px; margin: -8px 0 4px; }
+  .askbox { width: 100%; max-width: 720px; border: 1px solid var(--line); border-radius: 16px;
+            background: var(--panel); padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+  .askbox textarea { width: 100%; border: 0; outline: none; resize: none; background: none;
+                     color: inherit; font: inherit; max-height: 220px; }
+  .askrow { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            margin-top: 8px; }
+  .askrow select { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line);
+                   border-radius: 8px; background: var(--bg); color: var(--ink); max-width: 220px; }
+  .askrow select:disabled { opacity: .6; }
+  .send { border: 0; border-radius: 9px; background: var(--accent); color: #fff; font: inherit;
+          font-size: 14px; padding: 7px 16px; cursor: pointer; }
+  .send:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 12px; }
+
+  /* the conversation */
+  #log { flex: 1; overflow-y: auto; padding: 24px 20px 8px; }
+  .thread { max-width: 780px; margin: 0 auto; }
+  form.composer { border-top: 1px solid var(--line); padding: 12px 20px 18px; }
+  form.composer .askbox { margin: 0 auto; }
+
+  .msg { margin: 16px 0; display: flex; gap: 12px; }
+  .msg .who { flex: 0 0 52px; font-size: 12px; color: var(--muted); padding-top: 9px; text-align: right; }
+  .msg .body { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+               padding: 10px 14px; overflow-wrap: anywhere; min-width: 0; }
   .msg.user .body { background: var(--user); white-space: pre-wrap; }
   .msg .body p { margin: 0 0 8px; } .msg .body p:last-child { margin-bottom: 0; }
-  .msg .body table { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; }
+  .msg .body table { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; width: 100%; }
   .msg .body th, .msg .body td { border: 1px solid var(--line); padding: 4px 8px; }
   .msg .body code { background: var(--tool); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
   .msg .body pre { background: var(--tool); padding: 8px; border-radius: 6px; overflow: auto; }
+  .msg .body h2, .msg .body h3 { font-size: 15px; margin: 12px 0 6px; }
+
   /* Agent steps are diagnostics, not conversation: hidden unless asked for.
-     Tool failures are part of that activity and hide with it — the agent usually
-     recovers on its own. Connection and agent errors are not steps and stay. */
+     Tool failures hide with them — the agent usually recovers on its own.
+     Connection and agent errors are not steps and stay. */
   body:not(.show-steps) .tool,
   body:not(.show-steps) .error.step { display: none; }
-  /* Temporary: the database is chosen per conversation until it becomes a property
-     of the signed-in session. Disabled once a conversation is running, because it
-     cannot change. */
-  header .picker select { font: inherit; font-size: 12px; padding: 3px 6px;
-                          border: 1px solid var(--line); border-radius: 6px;
-                          background: var(--panel); color: var(--ink); }
-  header .picker select:disabled { opacity: .65; cursor: not-allowed; }
-  header .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
-                   color: var(--muted); cursor: pointer; user-select: none; }
-  header .toggle input { margin: 0; cursor: pointer; }
-  .tool { margin: 6px 0 6px 74px; font-size: 12.5px; color: var(--muted); background: var(--tool);
-          border: 1px dashed var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; }
-  .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px;
-               flex: 0 0 8px; animation: pulse 1s infinite; }
+  .tool { margin: 6px 0 6px 64px; font-size: 12.5px; color: var(--muted); background: var(--tool);
+          border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; }
+  .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+               flex: 0 0 8px; margin-top: 6px; animation: pulse 1s infinite; }
   .tool.done .dot { animation: none; background: var(--ok); }
   .tool.error .dot { animation: none; background: var(--err); }
   .tool .name { font-weight: 600; color: var(--ink); }
   .tool .detail { font-family: Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
   @keyframes pulse { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
-  /* Shown from the moment a prompt is sent until the agent produces something,
-     and again between a tool returning and the next output — the two places the
-     UI would otherwise sit silent and look broken. */
-  /* Not a message, so not a message bubble: no panel fill, no border. */
+
+  /* Not a message, so not a message bubble. */
   .thinking .body { display: inline-flex; gap: 5px; align-items: center;
                     background: none; border: none; padding: 12px 2px; }
   .thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
@@ -69,53 +108,87 @@
   .thinking i:nth-child(2) { animation-delay: .2s }
   .thinking i:nth-child(3) { animation-delay: .4s }
   @keyframes blink { 0%,80%,100% { opacity: .25 } 40% { opacity: 1 } }
-  .report { margin: 10px 0 10px 74px; display: flex; align-items: center; gap: 14px; background: var(--panel);
-            border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; }
-  .report .icon { width: 36px; height: 44px; border-radius: 4px; background: var(--accent);
-                  color: var(--accent-ink); display: grid; place-items: center; font-size: 11px; font-weight: 700; }
-  .report .t { flex: 1; } .report .t .title { font-weight: 600; } .report .t .sub { font-size: 12px; color: var(--muted); }
-  .report a { background: var(--accent); color: var(--accent-ink); text-decoration: none; padding: 8px 14px;
-              border-radius: 8px; font-weight: 600; font-size: 14px; }
-  .error { margin: 8px 0 8px 74px; color: var(--err); font-size: 13px; }
-  .meta { margin: 2px 0 8px 74px; font-size: 11.5px; color: var(--muted); }
-  form { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--line);
-         padding: 12px 16px; }
-  form .row { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
-  textarea { flex: 1; resize: none; min-height: 44px; max-height: 200px; padding: 10px 12px; border-radius: 10px;
-             border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
-  form button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
-                padding: 0 18px; height: 44px; font-weight: 600; cursor: pointer; }
-  form button:disabled { opacity: .5; cursor: default; }
+
+  .report { margin: 10px 0 10px 64px; display: flex; align-items: center; gap: 14px;
+            background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; }
+  .report .icon { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent);
+                  border-radius: 5px; padding: 3px 6px; }
+  .report .t { flex: 1; } .report .title { font-weight: 600; font-size: 14px; }
+  .report .sub { font-size: 12px; color: var(--muted); }
+  .report a { color: var(--accent); font-size: 13px; }
+  .error { margin: 8px 0 8px 64px; color: var(--err); font-size: 13px; }
+  .meta { margin: 2px 0 8px 64px; font-size: 11.5px; color: var(--muted); }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Report Agent</h1>
-  <div class="status" id="status">connecting…</div>
-  <label class="picker" title="The database this conversation queries. Fixed once it starts.">
-    <select id="dbPicker"></select>
-  </label>
-  <label class="toggle" title="Show the agent's tool calls (run_sql, Read, Grep…)">
-    <input type="checkbox" id="stepsToggle"> Agent steps
-  </label>
-  <button id="newBtn" title="Start a new conversation">New conversation</button>
-</header>
-<main id="log"></main>
-<form id="form">
-  <div class="row">
-    <textarea id="input" placeholder="Describe the report you need… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
-    <button id="send" type="submit">Send</button>
+<aside>
+  <div class="top">
+    <div class="brand">Report Agent</div>
+    <button class="newchat" id="newBtn">＋ New chat</button>
   </div>
-</form>
+  <div class="list" id="convList"></div>
+  <div class="foot">
+    <label title="Show the agent's tool calls (run_sql, Read, Grep…)">
+      <input type="checkbox" id="stepsToggle"> Agent steps
+    </label>
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div id="convTitle"></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="dbtag hidden" id="dbTag"></span>
+      <span id="status">ready</span>
+    </div>
+  </div>
+
+  <!-- root: ask anything -->
+  <section class="welcome" id="welcome">
+    <h1>What would you like to know?</h1>
+    <div class="sub">Ask a question about your data and I'll build a report.</div>
+    <div class="askbox">
+      <textarea id="askInput" rows="2" placeholder="Ask anything…"></textarea>
+      <div class="askrow">
+        <select id="dbPicker" title="The database this conversation queries. Fixed once it starts."></select>
+        <button class="send" id="askSend">Send</button>
+      </div>
+    </div>
+    <div class="hint">A conversation is tied to one database and cannot change it.</div>
+  </section>
+
+  <!-- a conversation -->
+  <div id="log" class="hidden"><div class="thread" id="thread"></div></div>
+  <form class="composer hidden" id="composer">
+    <div class="askbox">
+      <textarea id="input" rows="1" placeholder="Reply… (Enter to send, Shift+Enter for newline)"></textarea>
+      <div class="askrow">
+        <span class="hint" id="composerHint"></span>
+        <button class="send" id="send" type="submit">Send</button>
+      </div>
+    </div>
+  </form>
+</main>
 
 <script>
 (() => {
-  const log = document.getElementById('log');
-  const input = document.getElementById('input');
-  const sendBtn = document.getElementById('send');
-  const status = document.getElementById('status');
-  let ws = null, cid = null, busy = false;
-  let current = null;          // { el, text } for the assistant message being streamed
+  const thread   = document.getElementById('thread');
+  const logEl    = document.getElementById('log');
+  const welcome  = document.getElementById('welcome');
+  const composer = document.getElementById('composer');
+  const input    = document.getElementById('input');
+  const askInput = document.getElementById('askInput');
+  const sendBtn  = document.getElementById('send');
+  const askSend  = document.getElementById('askSend');
+  const status   = document.getElementById('status');
+  const dbPicker = document.getElementById('dbPicker');
+  const dbTag    = document.getElementById('dbTag');
+  const convList = document.getElementById('convList');
+  const convTitle = document.getElementById('convTitle');
+  const composerHint = document.getElementById('composerHint');
+
+  let ws = null, cid = null, busy = false, current = null, thinkingEl = null;
   const tools = new Map();     // tool_use_id -> element
 
   // -- tiny markdown renderer (headings, bold/italic, code, lists, tables, links) --
@@ -148,15 +221,46 @@
     return out.join('');
   }
 
-  const scroll = () => window.scrollTo({ top: document.body.scrollHeight });
+  const scroll = () => { logEl.scrollTop = logEl.scrollHeight; };
+
   function addMsg(who, text) {
     const el = document.createElement('div'); el.className = 'msg ' + who;
     el.innerHTML = `<div class="who">${who === 'user' ? 'You' : 'Agent'}</div><div class="body"></div>`;
-    const body = el.querySelector('.body'); if (who === 'user') body.textContent = text; else body.innerHTML = md(text || '');
-    log.appendChild(el); scroll(); return el;
+    const body = el.querySelector('.body');
+    if (who === 'user') body.textContent = text; else body.innerHTML = md(text || '');
+    thread.appendChild(el); scroll(); return el;
   }
+  function addTool(ev) {
+    const el = document.createElement('div'); el.className = 'tool'; el.dataset.id = ev.id;
+    const name = (ev.name || '').replace(/^mcp__[^_]+__/, '');
+    el.innerHTML = `<div class="dot"></div><div><span class="name">${esc(name)}</span> <span class="detail">${esc(ev.summary || '')}</span></div>`;
+    thread.appendChild(el); tools.set(ev.id, el); scroll();
+  }
+  function addReport(ev) {
+    const el = document.createElement('div'); el.className = 'report';
+    const kb = ev.size_bytes ? Math.round(ev.size_bytes / 1024) + ' KB · ' : '';
+    el.innerHTML = `<div class="icon">PDF</div><div class="t"><div class="title">${esc(ev.title || 'Report')}</div>
+      <div class="sub">${kb}${esc(ev.filename || '')}</div></div>
+      <a href="${esc(ev.url)}" target="_blank" rel="noopener" download>Download</a>`;
+    thread.appendChild(el); scroll();
+  }
+  function note(cls, text) {
+    const el = document.createElement('div'); el.className = cls; el.textContent = text;
+    thread.appendChild(el); scroll();
+  }
+  // Shown from the moment a prompt is sent until the agent produces something, and
+  // again between a tool returning and the next output — the two places the UI would
+  // otherwise sit silent and look broken.
+  function showThinking() {
+    if (thinkingEl || current) return;
+    thinkingEl = document.createElement('div');
+    thinkingEl.className = 'msg agent thinking';
+    thinkingEl.innerHTML = '<div class="who">Agent</div><div class="body"><i></i><i></i><i></i></div>';
+    thread.appendChild(thinkingEl); scroll();
+  }
+  function hideThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
+
   const stepsToggle = document.getElementById('stepsToggle');
-  // Off on a first visit; a deliberate choice is remembered after that.
   try { stepsToggle.checked = localStorage.getItem('showSteps') === '1'; } catch (e) {}
   document.body.classList.toggle('show-steps', stepsToggle.checked);
   stepsToggle.addEventListener('change', () => {
@@ -165,40 +269,19 @@
     scroll();
   });
 
-  function addTool(ev) {
-    const el = document.createElement('div'); el.className = 'tool'; el.dataset.id = ev.id;
-    const name = ev.name.replace(/^mcp__[^_]+__/, '');
-    el.innerHTML = `<div class="dot"></div><div><span class="name">${esc(name)}</span> <span class="detail">${esc(ev.summary || '')}</span></div>`;
-    log.appendChild(el); tools.set(ev.id, el); scroll();
+  function setBusy(b) {
+    busy = b; sendBtn.disabled = b; askSend.disabled = b;
+    status.textContent = b ? 'working…' : 'ready';
   }
-  function addReport(ev) {
-    const el = document.createElement('div'); el.className = 'report';
-    const kb = ev.size_bytes ? Math.round(ev.size_bytes / 1024) + ' KB · ' : '';
-    el.innerHTML = `<div class="icon">PDF</div><div class="t"><div class="title">${esc(ev.title || 'Report')}</div>
-      <div class="sub">${kb}${esc(ev.filename || '')}</div></div>
-      <a href="${esc(ev.url)}" target="_blank" rel="noopener" download>Download</a>`;
-    log.appendChild(el); scroll();
-  }
-  let thinkingEl = null;
-  function showThinking() {
-    if (thinkingEl || current) return;
-    thinkingEl = document.createElement('div');
-    thinkingEl.className = 'msg agent thinking';
-    thinkingEl.innerHTML = '<div class="who">Agent</div><div class="body"><i></i><i></i><i></i></div>';
-    log.appendChild(thinkingEl); scroll();
-  }
-  function hideThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
-
-  function note(cls, text) { const el = document.createElement('div'); el.className = cls; el.textContent = text; log.appendChild(el); scroll(); }
-
-  function setBusy(b) { busy = b; sendBtn.disabled = b; status.innerHTML = b ? 'working…' : `<b>ready</b> · ${cid ? cid.slice(0, 8) : ''}`; }
 
   function handle(ev) {
     switch (ev.type) {
       case 'hello': setBusy(false); (ev.reports || []).forEach(addReport);
-        if (ev.database) note('meta', `Querying ${ev.database}. A conversation cannot change database — start a new one to query another.`);
-        if (ev.agent_mode === 'mock') note('meta', 'Running in mock mode (AGENT_MODE=mock): scripted agent, sample data.'); break;
+        if (ev.database) showDatabase(ev.database);
+        if (ev.agent_mode === 'mock') note('meta', 'Running in mock mode (AGENT_MODE=mock): scripted agent, sample data.');
+        break;
       case 'turn_start': current = null; break;
+      case 'user': addMsg('user', ev.text); break;          // replay only
       case 'text_delta': hideThinking();
         if (!current) current = { el: addMsg('agent', ''), text: '' };
         current.text += ev.text; current.el.querySelector('.body').innerHTML = md(current.text); scroll(); break;
@@ -209,59 +292,192 @@
       case 'tool_result': { const el = tools.get(ev.tool_use_id); if (el) el.classList.add(ev.is_error ? 'error' : 'done');
         if (ev.is_error) note('error step', ev.preview || 'tool error'); showThinking(); break; }
       case 'report': hideThinking(); addReport(ev); break;
-      // cost_usd is the SDK's running total for the conversation, not this turn:
-      // ResultMessage carries session totals that only reset when the conversation does.
-      case 'result': if (ev.cost_usd != null && ev.cost_usd > 0) note('meta', `Turn finished in ${Math.round(ev.duration_ms / 1000)}s · conversation total $${ev.cost_usd.toFixed(3)}`); break;
+      // cost_usd is the SDK's running total for the conversation, not this turn.
+      case 'result': if (ev.cost_usd != null && ev.cost_usd > 0)
+        note('meta', `Turn finished in ${Math.round(ev.duration_ms / 1000)}s · conversation total $${ev.cost_usd.toFixed(3)}`); break;
       case 'error': hideThinking(); note('error', ev.message); break;
-      case 'turn_end': hideThinking(); setBusy(false); current = null; break;
+      case 'turn_end': hideThinking(); setBusy(false); current = null; loadConversations(); break;
     }
   }
 
-  const dbPicker = document.getElementById('dbPicker');
+  // ---------------------------------------------------------------- databases
+  // The first call opens a Snowflake connection and can take seconds. Held as a
+  // promise so a submit awaits it rather than reading an empty <select> and
+  // reporting "no database" for what is really "not yet".
+  let databasesLoaded = null;
 
   async function loadDatabases() {
+    dbPicker.innerHTML = '<option value="">loading…</option>';
     try {
-      const { databases } = await (await fetch('/databases')).json();
-      dbPicker.innerHTML = (databases || []).map(d => `<option>${esc(d)}</option>`).join('')
-        || '<option value="">(none available)</option>';
+      const r = await fetch('/databases');
+      if (!r.ok) throw new Error(`/databases returned ${r.status}`);
+      const { databases } = await r.json();
+      if (!databases || !databases.length) {
+        dbPicker.innerHTML = '<option value="">(none available)</option>';
+        return [];
+      }
+      dbPicker.innerHTML = databases.map(d => `<option>${esc(d)}</option>`).join('');
       const last = localStorage.getItem('database');
       if (last && databases.includes(last)) dbPicker.value = last;
-    } catch (e) { dbPicker.innerHTML = '<option value="">(unavailable)</option>'; }
+      return databases;
+    } catch (e) {
+      dbPicker.innerHTML = '<option value="">(unavailable)</option>';
+      status.textContent = `could not list databases: ${e.message}`;
+      return [];
+    }
   }
 
-  async function start() {
-    log.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
-    if (ws) { ws.onclose = null; ws.close(); }
-    status.textContent = 'connecting…';
-    const database = dbPicker.value;
-    if (!database) { note('error', 'no database available to query'); return; }
+  function showDatabase(name) {
+    dbTag.textContent = name; dbTag.classList.remove('hidden');
+    composerHint.textContent = `Querying ${name} — a conversation cannot change database.`;
+  }
+
+  // ---------------------------------------------------------------- sidebar
+  async function loadConversations() {
+    try {
+      const { conversations } = await (await fetch('/conversations?limit=40')).json();
+      convList.innerHTML = conversations.length
+        ? '<h4>Conversations</h4>' + conversations.map(c => {
+            const title = (c.title || 'New conversation').slice(0, 60);
+            return `<a class="conv${c.id === cid ? ' active' : ''}" href="/c/${c.id}" data-id="${c.id}">`
+                 + `${esc(title)}<span class="meta">${esc(c.database || '')} · ${c.turns} turn${c.turns === 1 ? '' : 's'}`
+                 + `${c.reports ? ' · ' + c.reports + ' report' + (c.reports === 1 ? '' : 's') : ''}</span></a>`;
+          }).join('')
+        : '<h4>Conversations</h4><div class="conv meta">None yet</div>';
+    } catch (e) { /* the list is a convenience; never block the page on it */ }
+  }
+
+  convList.addEventListener('click', e => {
+    const a = e.target.closest('.conv[data-id]');
+    if (!a) return;
+    e.preventDefault();
+    openConversation(a.dataset.id);
+  });
+
+  // ---------------------------------------------------------------- routing
+  function showWelcome() {
+    cid = null; closeSocket();
+    welcome.classList.remove('hidden');
+    logEl.classList.add('hidden'); composer.classList.add('hidden');
+    dbTag.classList.add('hidden'); convTitle.textContent = '';
+    dbPicker.disabled = false; setBusy(false);
+    askInput.value = ''; askInput.focus();
+    loadConversations();
+  }
+
+  function showConversation() {
+    welcome.classList.add('hidden');
+    logEl.classList.remove('hidden'); composer.classList.remove('hidden');
+  }
+
+  function closeSocket() {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  }
+
+  function connect(id) {
+    closeSocket();
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/${id}`);
+    ws.onmessage = e => handle(JSON.parse(e.data));
+    ws.onclose = () => { status.textContent = 'disconnected'; setBusy(true); };
+    ws.onerror = () => note('error', 'connection error');
+  }
+
+  // Opening by path is what makes a refresh resume: the transcript is replayed from
+  // the database, then the socket reconnects to the same conversation.
+  async function openConversation(id, { push = true } = {}) {
+    cid = id;
+    if (push) history.pushState({ cid: id }, '', `/c/${id}`);
+    showConversation();
+    thread.innerHTML = ''; tools.clear(); current = null; thinkingEl = null;
+    status.textContent = 'loading…';
+    try {
+      const r = await fetch(`/conversations/${id}/transcript`);
+      if (!r.ok) throw new Error(`conversation not found`);
+      const { events } = await r.json();
+      for (const row of events) handle({ ...row.payload, type: row.type });
+      current = null;
+    } catch (e) {
+      note('error', `Could not load this conversation: ${e.message}`);
+      status.textContent = 'ready';
+      return;
+    }
+    connect(id);
+    loadConversations();
+    input.focus();
+  }
+
+  async function newConversation(prompt) {
+    if (databasesLoaded) await databasesLoaded;
+    let database = dbPicker.value;
+    if (!database) { databasesLoaded = loadDatabases(); await databasesLoaded; database = dbPicker.value; }
+    if (!database) { status.textContent = 'no database available'; return; }
     localStorage.setItem('database', database);
+
     const r = await fetch('/conversations', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ database }),
     });
-    if (!r.ok) { note('error', JSON.stringify((await r.json()).detail)); return; }
-    cid = (await r.json()).conversation_id;
-    // Fixed for the life of the conversation: every query is checked against it.
-    dbPicker.disabled = true;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws/${cid}`);
-    ws.onmessage = e => handle(JSON.parse(e.data));
-    ws.onclose = () => { status.textContent = 'disconnected — click New conversation'; sendBtn.disabled = true; };
-    ws.onerror = () => note('error', 'connection error');
+    if (!r.ok) {
+      const detail = (await r.json()).detail;
+      status.textContent = typeof detail === 'string' ? detail : (detail?.error || 'could not start');
+      return;
+    }
+    const { conversation_id } = await r.json();
+    cid = conversation_id;
+    history.pushState({ cid }, '', `/c/${cid}`);
+    showConversation();
+    thread.innerHTML = ''; tools.clear(); current = null;
+    showDatabase(database);
+    connect(cid);
+    // The socket has to be open before the first prompt goes out.
+    await new Promise(res => { const t = setInterval(() => { if (ws && ws.readyState === 1) { clearInterval(t); res(); } }, 30); });
+    send(prompt);
+    loadConversations();
   }
 
-  document.getElementById('form').addEventListener('submit', e => {
-    e.preventDefault(); const text = input.value.trim(); if (!text || busy || !ws || ws.readyState !== 1) return;
-    addMsg('user', text); ws.send(JSON.stringify({ prompt: text })); input.value = ''; input.style.height = ''; setBusy(true); showThinking();
+  function send(text) {
+    if (!text || !ws || ws.readyState !== 1) return;
+    addMsg('user', text);
+    ws.send(JSON.stringify({ prompt: text }));
+    setBusy(true); showThinking();
+  }
+
+  // ---------------------------------------------------------------- events
+  composer.addEventListener('submit', e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || busy) return;
+    send(text); input.value = ''; input.style.height = '';
   });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('form').requestSubmit(); } });
-  input.addEventListener('input', () => { input.style.height = ''; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; });
+  askSend.addEventListener('click', () => {
+    const text = askInput.value.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    newConversation(text).catch(err => { note('error', String(err)); setBusy(false); });
+  });
+  for (const el of [input, askInput]) {
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        (el === input ? composer.requestSubmit() : askSend.click());
+      }
+    });
+    el.addEventListener('input', () => { el.style.height = ''; el.style.height = Math.min(el.scrollHeight, 220) + 'px'; });
+  }
   document.getElementById('newBtn').addEventListener('click', () => {
-    dbPicker.disabled = false;      // a new conversation may pick a different one
-    start();
+    history.pushState({}, '', '/');
+    showWelcome();
   });
-  start();
+  window.addEventListener('popstate', () => route({ push: false }));
+
+  function route({ push = true } = {}) {
+    const m = location.pathname.match(/^\/c\/([0-9a-fA-F-]{8,})$/);
+    if (m) openConversation(m[1], { push: false }); else showWelcome();
+  }
+
+  databasesLoaded = loadDatabases();
+  route();
 })();
 </script>
 </body>
