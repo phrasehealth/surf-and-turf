@@ -194,3 +194,64 @@ def test_every_form_in_the_dispatcher_is_documented():
     claude_md = (Path(__file__).resolve().parents[1] / "workspace" / "CLAUDE.md").read_text()
     for name in FORMS:
         assert f"`{name}`" in claude_md, f"{name} is not listed in CLAUDE.md"
+
+
+# ------------------------------------------- hand-drawn graphics are refused
+
+def test_publish_refuses_a_body_containing_raw_svg(conversation, results, run):
+    """`markdown_to_body` passes SVG through — that is how server-drawn charts reach
+    the PDF — so without this check the rule in CLAUDE.md enforces nothing."""
+    label = json.loads(run(record_tool.build_tool(
+        conversation, results, author="d@x.com", database="penn").handler(spec())
+    )["content"][0]["text"])["label"]
+
+    pub = publish_tool.build_tool(conversation, None, author="d@x.com", database="penn")
+    res = run(pub.handler({
+        "title": "R", "subtitle": "", "analyses": [label],
+        "body_markdown": '## Alert firings by type\n\n'
+                         '<svg viewBox="0 0 100 40"><rect width="60" height="20"/></svg>',
+    }))
+    assert res["is_error"]
+    text = res["content"][0]["text"]
+    assert "record_analysis" in text, "the refusal must name the supported route"
+    assert "chart_type" in text and "hbar" in text, "and list the forms"
+    assert "Markdown table" in text, "and give the fallback when no form fits"
+
+
+def test_publish_refuses_an_embedded_data_uri_image(conversation, results, run):
+    label = json.loads(run(record_tool.build_tool(
+        conversation, results, author="d@x.com", database="penn").handler(spec())
+    )["content"][0]["text"])["label"]
+    pub = publish_tool.build_tool(conversation, None, author="d@x.com", database="penn")
+    res = run(pub.handler({
+        "title": "R", "subtitle": "", "analyses": [label],
+        "body_markdown": '## Alert firings by type\n\n<img src="data:image/png;base64,iVBOR">',
+    }))
+    assert res["is_error"] and "embedded image" in res["content"][0]["text"]
+
+
+def test_prose_mentioning_svg_is_not_refused():
+    """A complete element draws something; a mention of one does not."""
+    from app.tools.publish_report import _reject_hand_drawn_graphics
+
+    assert _reject_hand_drawn_graphics("We considered <svg> output but used a table.") is None
+    assert _reject_hand_drawn_graphics("See `gold.svg_assets` for details.") is None
+
+
+def test_the_servers_own_figures_still_reach_the_pdf(conversation, results, db_conn, run):
+    """The check runs on what the model wrote, before figures are placed —
+    otherwise it would reject the server's own charts."""
+    label = json.loads(run(record_tool.build_tool(
+        conversation, results, author="d@x.com", database="penn").handler(spec())
+    )["content"][0]["text"])["label"]
+    pub = publish_tool.build_tool(conversation, None, author="d@x.com", database="penn")
+    out = json.loads(run(pub.handler({
+        "title": "R", "subtitle": "", "analyses": [label],
+        "body_markdown": "## Alert firings by type\n\nnumbers below.",
+    }))["content"][0]["text"])
+    assert out["status"] == "published"
+
+    async def _svg():
+        async with db_conn.begin() as conn:
+            return (await conn.execute(text("SELECT svg FROM figures"))).scalar_one()
+    assert run(_svg()).startswith("<svg"), "the chart the server drew is still there"

@@ -10,12 +10,14 @@ import asyncio
 import html
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from claude_agent_sdk import tool
 
+from ..chart_render import FORMS, describe_channels
 from ..config import settings
 from ..db import repository
 from ..pdf import render_report_pdf
@@ -75,6 +77,37 @@ _RECORD_FIRST = (
 
 def _error(msg: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
+
+
+# Raw graphics the model might embed. `markdown_to_body` deliberately passes SVG
+# through — that is how a server-drawn chart reaches the PDF — so without this check
+# `CLAUDE.md`'s "never write <svg>" is a rule nothing enforces.
+#
+# A *complete* element, matching what the renderer actually preserves: prose that
+# mentions `<svg>` without closing it draws nothing and is not worth refusing over.
+_RAW_GRAPHIC = re.compile(r"(?s)<svg\b.*?</svg\s*>|<img\s[^>]*src\s*=\s*[\"']data:", re.I)
+
+
+def _reject_hand_drawn_graphics(body: str) -> str | None:
+    """A refusal if the body embeds a picture the server did not draw, else None.
+
+    A hand-drawn chart is wrong in a way no reader can see: its geometry is not a
+    function of the data, so it can look right and be wrong, and a refresh updates
+    the numbers beside it while the picture keeps showing last quarter's.
+    """
+    if not _RAW_GRAPHIC.search(body):
+        return None
+    return (
+        "Rejected: `body_markdown` contains raw <svg> or an embedded image. Charts are "
+        "drawn by the server from the rows the analysis recorded — that is what keeps a "
+        "figure consistent with its table, on the house palette, and correct after a "
+        "refresh.\n\n"
+        "Declare the chart on `record_analysis` instead:\n"
+        f"  chart_type = one of {', '.join(sorted(FORMS))}\n"
+        f"  chart_spec = which result columns fill which channel — {describe_channels()}\n\n"
+        "If no form fits, use a Markdown table and say so in the footnote. Remove the "
+        "markup and call publish_report again."
+    )
 
 
 def _place_figures(body: str, runs: list[dict[str, Any]]) -> str:
@@ -138,6 +171,10 @@ def build_tool(conversation_id: str, on_published: OnPublished | None = None,
         # Every analysis in a report must be recorded first, so the numbers can be
         # traced, refreshed and reused (docs/persistence-schema.md §7). The refusal
         # is written to be acted on, not merely to be correct.
+        refusal = _reject_hand_drawn_graphics(body)
+        if refusal:
+            return _error(refusal)
+
         labels = [str(x) for x in (args.get("analyses") or [])]
         resolved, unknown = await repository.resolve_analysis_labels(conversation_id, labels)
         sections = body.count("\n## ") + (1 if body.startswith("## ") else 0)

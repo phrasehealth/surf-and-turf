@@ -108,9 +108,16 @@ which pairs never happen at all. Set `diagonal_blank: true` when a row paired wi
 itself is structurally meaningless.
 
 Never write `<svg>`, never choose a colour, and never write a figure number. Colours,
-axes, labels and the caption are the server's, so every report looks the same. If the
-chart cannot be drawn, `record_analysis` says why and still records the analysis —
-fix the spec and record it again with `supersedes`.
+axes, labels and the caption are the server's, so every report looks the same.
+**`publish_report` refuses a body containing raw `<svg>` or an embedded image** — a
+hand-drawn chart is wrong in a way no reader can see, since its shape is not computed
+from the data and a later refresh updates the numbers beside it while the picture
+still shows the old ones.
+
+If no form fits the question, use a Markdown table and say so in the footnote. That is
+a better answer than a picture nobody can check. If the chart cannot be drawn,
+`record_analysis` says why and still records the analysis — fix the spec and record it
+again with `supersedes`.
 
 ### Footnotes
 
